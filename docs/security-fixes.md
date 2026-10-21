@@ -31,3 +31,21 @@ The full Python suite passed 28 tests. All 249 executable gateway lines were
 covered. Existing account rotation, session expiration/logout, WebSocket teardown,
 rate limiting, origin checks and encrypted credential tests still pass. Full
 Docker deployment and upstream engine security are separate verification scopes.
+
+## Release gating
+
+The release workflow now calls the CI workflow before its packaging jobs. Required
+CI failures block all release builds and publishing, rather than allowing a main
+branch push to publish independently of test and coverage results. Separate CI
+concurrency groups prevent the called workflow from canceling standalone checks.
+The workflow configuration was checked locally; remote CI and releases were not
+run, and the current coverage target intentionally keeps release gates failing.
+
+Release-tag input is passed as environment data and checked with
+`git check-ref-format`, preventing shell/output injection through interpolated
+workflow input. Local checks verify newline injection is rejected. Checksum
+creation excludes its own output; local checks verify every listed asset hash,
+including a filename beginning with a dash. Windows packaging now builds with the
+desktop feature and fails if the executable is missing. These are configuration
+fixes; Windows binaries and remote release jobs were not built in this session.
+All workflow files passed `actionlint` (including ShellCheck).

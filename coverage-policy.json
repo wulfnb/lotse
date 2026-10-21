@@ -40,7 +40,8 @@
     "aarch64-apple-darwin:desktop",
     "aarch64-unknown-linux-gnu:desktop",
     "x86_64-unknown-linux-gnu:desktop",
-    "x86_64-pc-windows-msvc:core"
+    "x86_64-pc-windows-msvc:core",
+    "x86_64-pc-windows-msvc:desktop"
   ],
   "policy": "Every first-party executable file must have a line measurement. Missing files and untested build configurations fail completeness; they never count as 100%. Branch coverage is informational. Test drivers and third-party source are listed separately."
 }

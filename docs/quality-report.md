@@ -1,8 +1,9 @@
 # Architecture and quality implementation — 21 October 2026
 
-All changes remain uncommitted and unpushed, as requested. The repository still
-has no initial commit; the evening commit can include the existing source and
-these improvements together. No Git staging or history mutation was performed.
+No staging, commit or push was performed by this agent. An initial commit
+`c0849c1` appeared in the shared checkout during verification; it was not created
+by this agent and has been left untouched. The latest workflow, coverage-policy
+and report edits remain unstaged and uncommitted.
 
 ## Implemented
 
@@ -96,7 +97,9 @@ percentage is asserted while executable shell files and other builds are unmeasu
 `target/coverage/inventory.md` and `inventory.json` list every first-party source
 file, its classification, exact counters and uncovered line numbers. The current
 inventory has **38 production files below target or unmeasured**, including three
-shell scripts. Linux ARM64/AMD64 desktop and Windows core measurements are missing.
+shell scripts. Linux ARM64/AMD64 desktop and Windows core/desktop measurements
+are missing (four build configurations). Windows desktop is required because the
+release workflow now builds a desktop executable, rather than packaging a core-only build.
 Coverage tooling and test drivers are listed separately, rather than counted as
 production. Vendored dependencies are outside this first-party target.
 
@@ -165,6 +168,14 @@ filesystem flake has been eliminated.
 - Rust reports carry a source fingerprint. Export/inventory rejects changed or
   unverifiable sources, and empty platform reports cannot satisfy required builds.
   Windows report paths are interpreted correctly when collected on another OS.
+- Release packaging now depends on the reusable CI workflow. Failed tests or
+  required coverage gates block release jobs, including Docker publication.
+  Called CI and standalone CI use separate concurrency groups so they cannot
+  cancel each other. Release tags are passed through environment variables and
+  validated as Git refs, checksum output no longer includes itself, and Windows
+  packaging refuses archives without a real desktop executable. All workflows
+  passed actionlint; local release-tag and checksum regressions passed. No remote
+  workflow, cross-platform package or release was triggered here.
 
 The final native results are in
 `target/coverage/desktop/native-tests/run-lk1wdzkp/results.json` (all seven passed).
