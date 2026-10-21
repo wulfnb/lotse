@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lotse Browser — Native Rust Browser powered by Servo</title>
+  <meta name="description" content="Lotse is a native Rust desktop browser engineered in Germany that embeds the open-source Servo 0.7.0 web engine. Features movable tabs, AppKit vibrancy, and multi-platform packaging.">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    :root {
+      --bg: #061513;
+      --surface: #0a201d;
+      --surface-border: #143833;
+      --surface-hover: #0e2b27;
+      --accent: #10b981;
+      --accent-glow: rgba(16, 185, 129, 0.25);
+      --accent-light: #6ee7b7;
+      --text: #ecfdf5;
+      --text-muted: #94a3b8;
+      --code-bg: #040e0d;
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* Ambient background gradient glow */
+    .glow-orb {
+      position: absolute;
+      width: 650px;
+      height: 650px;
+      border-radius: 50%;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      top: -150px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 0 24px;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* Navigation */
+    header {
+      padding: 24px 0;
+      border-bottom: 1px solid var(--surface-border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      background: rgba(6, 21, 19, 0.85);
+      z-index: 100;
+    }
+    .nav-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 1.25rem;
+    }
+    .brand img {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+    }
+    .badge {
+      font-size: 0.75rem;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-light);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .nav-links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.95rem;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover {
+      color: var(--accent-light);
+    }
+    .btn-github {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-github:hover {
+      border-color: var(--accent);
+      background: var(--surface-hover);
+    }
+
+    /* Hero Section */
+    .hero {
+      padding: 96px 0 64px;
+      text-align: center;
+    }
+    .hero h1 {
+      font-size: 3.5rem;
+      line-height: 1.15;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 20px;
+      background: linear-gradient(135deg, #ffffff 40%, #6ee7b7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 36px;
+      line-height: 1.6;
+    }
+    .download-grid {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 48px;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #031410;
+      font-weight: 700;
+      padding: 14px 28px;
+      border-radius: 10px;
+      text-decoration: none;
+      box-shadow: 0 4px 20px var(--accent-glow);
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .btn-primary:hover {
+      background: #34d399;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 24px rgba(16, 185, 129, 0.4);
+    }
+    .btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--surface-border);
+      font-weight: 600;
+      padding: 14px 24px;
+      border-radius: 10px;
+      text-decoration: none;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-secondary:hover {
+      background: var(--surface-hover);
+      border-color: var(--accent);
+    }
+
+    /* Terminal Preview */
+    .terminal {
+      background: var(--code-bg);
+      border: 1px solid var(--surface-border);
+      border-radius: 12px;
+      max-width: 720px;
+      margin: 0 auto 64px;
+      text-align: left;
+      overflow: hidden;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    }
+    .terminal-bar {
+      background: #091715;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--surface-border);
+    }
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #1f3d37;
+    }
+    .terminal-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+    }
+    .terminal-body {
+      padding: 20px;
+      font-family: var(--mono);
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      overflow-x: auto;
+    }
+    .terminal-body .cmd {
+      color: var(--accent-light);
+    }
+    .copy-btn {
+      background: transparent;
+      border: 1px solid var(--surface-border);
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    /* Features Grid */
+    .section-title {
+      text-align: center;
+      font-size: 2.2rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+      letter-spacing: -0.02em;
+    }
+    .section-subtitle {
+      text-align: center;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin: 0 auto 48px;
+    }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      margin-bottom: 96px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: var(--radius);
+      padding: 32px;
+      transition: all 0.2s;
+    }
+    .card:hover {
+      border-color: rgba(16, 185, 129, 0.5);
+      transform: translateY(-4px);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+    }
+    .card-icon {
+      font-size: 1.75rem;
+      margin-bottom: 16px;
+      display: inline-block;
+    }
+    .card h3 {
+      font-size: 1.25rem;
+      margin-bottom: 10px;
+      color: #fff;
+    }
+    .card p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    /* Disclaimer Box */
+    .notice-box {
+      background: rgba(16, 185, 129, 0.05);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: var(--radius);
+      padding: 28px;
+      margin-bottom: 80px;
+    }
+    .notice-box h4 {
+      color: var(--accent-light);
+      margin-bottom: 12px;
+      font-size: 1.1rem;
+    }
+    .notice-box p {
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-bottom: 10px;
+    }
+    .notice-box p:last-child { margin-bottom: 0; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--surface-border);
+      padding: 48px 0;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    .footer-grid {
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 32px;
+      margin-bottom: 32px;
+    }
+    .footer-col h5 {
+      color: #fff;
+      margin-bottom: 12px;
+      font-size: 0.95rem;
+    }
+    .footer-col ul {
+      list-style: none;
+    }
+    .footer-col li {
+      margin-bottom: 8px;
+    }
+    .footer-col a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .footer-col a:hover {
+      color: var(--accent-light);
+    }
+    .copyright {
+      text-align: center;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 2.5rem; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-orb"></div>
+
+  <header>
+    <div class="container nav-wrapper">
+      <a href="#" class="brand">
+        <img src="logo.png" alt="Lotse Logo">
+        <span>Lotse</span>
+        <span class="badge">v0.1.0-alpha.1</span>
+      </a>
+      <div class="nav-links">
+        <a href="#motivation">Why Lotse?</a>
+        <a href="#features">Features</a>
+        <a href="#docker">Docker</a>
+        <a href="#downloads">Downloads</a>
+        <a href="#disclaimer">Legal</a>
+        <a href="https://github.com/noufalbabu/lotse" class="btn-github" target="_blank" rel="noopener">
+          <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <h1>A Native Rust Browser<br>Powered by Servo</h1>
+      <p>
+        Lotse is an independent desktop browser engineered in Germany that embeds the open-source <strong>Servo 0.7.0</strong> engine. Built with movable tabs, AppKit vibrancy, and zero unsafe code in its core.
+      </p>
+
+      <div class="download-grid" id="downloads">
+        <a href="https://github.com/noufalbabu/lotse/releases/latest" class="btn-primary" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Alpha Preview
+        </a>
+        <a href="#docker" class="btn-secondary">
+          Run in Docker
+        </a>
+      </div>
+
+      <div class="terminal" id="docker">
+        <div class="terminal-bar">
+          <div class="terminal-dots">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          </div>
+          <span class="terminal-title">Quick Launch via Docker</span>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d -p 7443:7443 -e SERVO_WEB_PASSWORD=\'choose-a-strong-password\' ghcr.io/noufalbabu/lotse:latest'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 2000)">Copy</button>
+        </div>
+        <div class="terminal-body">
+          <span class="cmd">docker run</span> -d \<br>
+          &nbsp;&nbsp;-p 7443:7443 \<br>
+          &nbsp;&nbsp;-e SERVO_WEB_PASSWORD=<span style="color: #f59e0b;">'choose-a-strong-password'</span> \<br>
+          &nbsp;&nbsp;ghcr.io/noufalbabu/lotse:latest<br><br>
+          <span style="color: #64748b;"># Open https://localhost:7443 in your browser to sign in.</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="motivation" style="margin-bottom: 80px;">
+      <h2 class="section-title">Why Lotse?</h2>
+      <p class="section-subtitle">Born out of the frustration with RAM-heavy corporate browsers and the dream of turning Servo into a daily driver.</p>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">🚀</div>
+          <h3>A Real Servo Browser</h3>
+          <p>For years, the revolutionary Servo engine existed primarily as an embedded research library. Lotse brings it to life as a complete, usable browser with draggable tabs, bookmarks, and developer tools.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🏠</div>
+          <h3>Built for the Homelab</h3>
+          <p>Access your internal home server dashboards and the wider web over secure, authenticated HTTPS with zero heavy desktop bloat. Deploy in seconds via lightweight Docker containers.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🍃</div>
+          <h3>Ending RAM Exhaustion</h3>
+          <p>No more system freezes or fan noise from dozens of hidden browser helper processes. Built in Rust with immediate-mode UI for predictable, minimal memory consumption.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🌐</div>
+          <h3>Breaking the Monoculture</h3>
+          <p>With almost every browser now running on Google's Blink/Chromium engine, web standards risk being dictated by a single advertising giant. Lotse keeps the open web diverse by championing Servo.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🔒</div>
+          <h3>Radical Privacy &amp; Zero Telemetry</h3>
+          <p>No tracking IDs, no diagnostic phone-home telemetry, and no ad profiling. Your navigation, credentials, and session state remain strictly local to your machine.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3>Memory Safety by Design</h3>
+          <p>Over 70% of historical browser exploits trace back to C/C++ memory corruption. Lotse leverages Rust's strict compile-time safety and <code>#![forbid(unsafe_code)]</code> to eliminate whole vulnerability classes.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="features">
+      <h2 class="section-title">Built for Performance and Modularity</h2>
+      <p class="section-subtitle">Lotse strictly separates presentation, session transitions, and engine handles through Hexagonal Ports & Adapters.</p>
+
+      <div class="features-grid">
+        <div class="card">
+          <div class="card-icon">⚡</div>
+          <h3>Servo 0.7.0 WebRender</h3>
+          <p>Websites are fetched, parsed, and painted via Servo's multi-threaded WebRender GPU pipeline. Each tab renders into an isolated offscreen framebuffer composited via OpenGL.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">📐</div>
+          <h3>Movable Draggable Tabs</h3>
+          <p>Tabs can be placed in a top horizontal strip or a resizable vertical sidebar with fluid drag-and-drop reordering that keeps live WebViews and engine states intact.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🛡️</div>
+          <h3>Zero Unsafe in Core</h3>
+          <p>The core business domain enforces <code>#![forbid(unsafe_code)]</code>. Storage durability, URL validation, and session models compile and test without any window server or GPU.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🍎</div>
+          <h3>Native AppKit Integration</h3>
+          <p>Under macOS, Lotse embeds native <code>NSVisualEffectView</code> vibrancy behind the render layer, bridges Control Center media keys, and connects with <code>UNUserNotificationCenter</code>.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">⬇️</div>
+          <h3>Multipart Streaming Downloads</h3>
+          <p>Parallel segmented downloading via process-isolated streaming workers. Features automatic range detection, atomic publication, and collision-resistant file placement.</p>
+        </div>
+        <div class="card">
+          <div class="card-icon">🛠️</div>
+          <h3>10 Native DevTools Panels</h3>
+          <p>Built-in developer tools including DOM Tree Inspector, Live CSS Style Editor, Network HAR Recorder, Storage & Cookie Viewer, and Getter-Safe Console Evaluator.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="notice-box" id="disclaimer">
+      <h4>⚠️ Alpha Test Notice & Haftungsausschluss (§ 521 BGB)</h4>
+      <p><strong>This is an experimental Alpha release (v0.1.0-alpha.1) provided free of charge for developer testing and technical evaluation.</strong></p>
+      <p>Lotse embeds the Servo engine, which is under active open-source development and does not yet implement all web security standards or sandboxing mechanisms present in mature commercial browsers. <strong>Do not use Lotse for security-sensitive activities such as online banking or accessing critical confidential accounts.</strong></p>
+      <p>Pursuant to § 521 of the German Civil Code (BGB), liability of the developers and contributors for software provided free of charge is limited to cases of intent (<em>Vorsatz</em>) and gross negligence (<em>grobe Fahrlässigkeit</em>).</p>
+      <p><em>Servo is a registered trademark of the Linux Foundation. Lotse is an independent open-source project and is not affiliated with or endorsed by the Linux Foundation or Mozilla.</em></p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-col">
+          <h5>Lotse Browser</h5>
+          <p style="color: var(--text-muted); font-size: 0.85rem; max-width: 280px; margin-top: 8px;">
+            Engineered in Germany.<br>
+            Powered by the open-source Servo web engine and Rust.
+          </p>
+        </div>
+        <div class="footer-col">
+          <h5>Downloads</h5>
+          <ul>
+            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">macOS (Apple Silicon .dmg)</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">Linux (x86_64 .tar.gz)</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">Windows (x64 .zip)</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/pkgs/container/lotse" target="_blank" rel="noopener">Docker Image (GHCR)</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h5>Architecture & Docs</h5>
+          <ul>
+            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture Specification</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/architecture-decisions.md" target="_blank" rel="noopener">Decision Records (ADR)</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/docker.md" target="_blank" rel="noopener">Docker Viewer Guide</a></li>
+            <li><a href="https://github.com/noufalbabu/lotse/blob/main/LICENSE" target="_blank" rel="noopener">License (MPL-2.0)</a></li>
+          </ul>
+        </div>
+      </div>
+      <div class="copyright">
+        &copy; 2026 Lotse Browser Project. Released under the <a href="https://github.com/noufalbabu/lotse/blob/main/LICENSE" style="color: var(--accent-light); text-decoration: none;">Mozilla Public License 2.0</a>.
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
+

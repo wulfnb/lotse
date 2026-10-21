@@ -1,0 +1,154 @@
+//! Application operations. No engine, window, filesystem or process types enter this layer.
+use crate::{
+    model::{Dock, Policy, Theme},
+    profile::{Bookmark, Profile, SavedFavicon, TabLayout},
+    storage::ProfileStore,
+};
+
+pub enum Command {
+    Layout(TabLayout),
+    Theme(Theme),
+    Dock(Dock),
+    SidebarWidth(f32),
+    Policy(Policy),
+    ToggleBookmark { title: String, url: String },
+    RemoveBookmark(usize),
+    ClearHistory,
+    Visit(Bookmark),
+    Favicon { url: String, image: SavedFavicon },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Event {
+    Changed,
+    PolicyChanged,
+    Unchanged,
+}
+
+/// Owns persisted state and talks to storage only through its injected port.
+/// Even a permissive adapter cannot overwrite a profile after a failed load.
+pub struct Application {
+    profile: Profile,
+    store: Box<dyn ProfileStore>,
+    writable: bool,
+}
+impl Application {
+    pub fn load(mut store: Box<dyn ProfileStore>) -> (Self, Option<String>) {
+        let (profile, warning, writable) = match store.load() {
+            Ok(profile) => (profile, None, true),
+            Err(error) => (
+                Profile::default(),
+                Some(format!(
+                    "{error}. Existing profile will not be overwritten."
+                )),
+                false,
+            ),
+        };
+        (
+            Self {
+                profile,
+                store,
+                writable,
+            },
+            warning,
+        )
+    }
+    pub fn profile(&self) -> &Profile {
+        &self.profile
+    }
+    pub fn apply(&mut self, command: Command) -> Event {
+        match command {
+            Command::Layout(value) => self.profile.layout = value,
+            Command::Theme(value) => self.profile.theme = value,
+            Command::Dock(value) => self.profile.devtools_dock = value,
+            Command::SidebarWidth(value) => {
+                if !value.is_finite() {
+                    return Event::Unchanged;
+                }
+                self.profile.sidebar_width = value.clamp(150.0, 500.0);
+            }
+            Command::Policy(value) => {
+                self.profile.policy = value;
+                return Event::PolicyChanged;
+            }
+            Command::ToggleBookmark { title, url } => self.profile.toggle_bookmark(title, url),
+            Command::RemoveBookmark(index) => {
+                if index >= self.profile.bookmarks.len() {
+                    return Event::Unchanged;
+                }
+                self.profile.bookmarks.remove(index);
+            }
+            Command::ClearHistory => self.profile.history.clear(),
+            Command::Visit(visit) => {
+                if !["http://", "https://", "file://"]
+                    .iter()
+                    .any(|scheme| visit.url.starts_with(scheme))
+                {
+                    return Event::Unchanged;
+                }
+                self.profile.history.retain(|entry| entry.url != visit.url);
+                self.profile.history.insert(0, visit);
+                self.profile.history.truncate(1000);
+            }
+            Command::Favicon { url, image } => {
+                if image.width == 0
+                    || image.height == 0
+                    || image.width > 32
+                    || image.height > 32
+                    || image.rgba.len() != image.width * image.height * 4
+                {
+                    return Event::Unchanged;
+                }
+                if self.profile.favicons.len() >= 128 && !self.profile.favicons.contains_key(&url) {
+                    self.profile.favicons.pop_first();
+                }
+                self.profile.favicons.insert(url, image);
+            }
+        }
+        Event::Changed
+    }
+    pub fn start_download(
+        &self,
+        port: &mut impl crate::downloads::DownloadPort,
+        address: &str,
+        filename: &str,
+        connections: usize,
+        cookies: String,
+    ) -> Result<(), String> {
+        let url = crate::downloads::validate_url(address)?;
+        if self.profile.policy.offline || !self.profile.policy.permits(&url) {
+            return Err("This download is blocked by your offline/host settings.".into());
+        }
+        port.start(url.as_str(), filename, connections, cookies)
+    }
+    /// Preserve selection by identity when non-persistable data tabs are removed.
+    pub fn save_session(&mut self, urls: Vec<String>, active: usize) -> Result<(), String> {
+        if !self.writable {
+            return Err(
+                "Profile has not loaded successfully; existing data will not be overwritten".into(),
+            );
+        }
+        let selected = urls
+            .iter()
+            .take(active)
+            .filter(|url| !url.starts_with("data:"))
+            .count();
+        let new_urls: Vec<String> = urls
+            .into_iter()
+            .filter(|url| !url.starts_with("data:"))
+            .collect();
+        let new_active = selected.min(new_urls.len().saturating_sub(1));
+        let previous_urls = std::mem::replace(&mut self.profile.urls, new_urls);
+        let previous_active = std::mem::replace(&mut self.profile.active, new_active);
+        if let Err(error) = self.store.save(&self.profile) {
+            self.profile.urls = previous_urls;
+            self.profile.active = previous_active;
+            return Err(error);
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "application_tests.rs"]
+mod tests;

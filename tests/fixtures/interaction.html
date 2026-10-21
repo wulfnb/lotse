@@ -1,0 +1,26 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo interaction fixture</title>
+<style>
+body { color: #eee; background: #232329; font: 20px system-ui; padding: 48px; }
+h1 { color: #c2a9ff; } button, input, select { padding: 12px; font: inherit; margin: 8px; }
+.card { padding: 24px; border: 2px solid #c2a9ff; border-radius: 18px; max-width: 680px; }
+.bg-clip-text { color: transparent; background-image: linear-gradient(to right, #00b888, #00805e); -webkit-background-clip: text; background-clip: text; font-size: 28px; }
+#normal-gradient { background-image: linear-gradient(to right, #00b888, #00805e); color: white; padding: 8px; }
+.spacer { height: 1400px; background: linear-gradient(#232329, #49315c); }
+</style>
+<h1>Real Servo rendering</h1>
+<div class="card">
+<p>This document is parsed, styled, painted and executed by Servo.</p>
+<button id="counter" onclick="this.textContent = 'Clicked ' + (++window.count)">Click me</button>
+<input id="input" placeholder="Type here">
+<select><option>First option</option><option>Second option</option></select>
+<p><a href="second.html">Navigate to another document</a></p>
+<button onclick="window.open('second.html')">Open new tab</button>
+<button onclick="alert('Hello from Servo')">JavaScript dialog</button>
+</div>
+<p id="gradient-probe" class="bg-clip-text">Gradient text stays readable</p>
+<p id="brand-gradient" class="bg-clip-text" style="--tw-gradient-from: #00b888; --tw-gradient-to: #00805e">Brand-colored gradient text</p>
+<p id="normal-gradient">Ordinary gradient backgrounds stay intact</p>
+<div class="spacer"></div><p id="bottom">Scrolling works.</p>
+<script>window.count = 0; console.log('Live Servo console is connected');</script>

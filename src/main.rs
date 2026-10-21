@@ -1,0 +1,242 @@
+// Browser chrome and engine integration, MPL-2.0.
+mod automation;
+mod brand;
+mod browser;
+mod capabilities;
+#[cfg(feature = "test-harness")]
+mod capabilities_test;
+mod capabilities_ui;
+mod capture;
+mod compat;
+mod console_model;
+mod console_ui;
+mod cookie_inspector;
+mod debug_driver;
+mod debug_model;
+mod debugger_ui;
+mod devtools_ui;
+#[cfg(feature = "test-harness")]
+mod download_test;
+use servo_browser::downloads;
+mod downloads_ui;
+mod engine;
+mod input;
+mod inspector_probes;
+mod inspector_ui;
+mod native_media;
+mod native_notifications;
+mod native_theme;
+mod network;
+mod network_controls;
+mod performance_ui;
+mod probes;
+use servo_browser::profile;
+mod resources;
+#[cfg(feature = "test-harness")]
+mod smoke;
+mod theme;
+#[cfg(feature = "test-harness")]
+mod theme_test;
+mod tool_window;
+mod toolbox;
+#[cfg(feature = "test-harness")]
+mod toolbox_test;
+mod ui;
+
+fn browser_icon() -> Option<winit::window::Icon> {
+    let image = image::load_from_memory(include_bytes!("../assets/icons/browser-icon-256.png"))
+        .ok()?
+        .into_rgba8();
+    let (width, height) = image.dimensions();
+    winit::window::Icon::from_rgba(image.into_raw(), width, height).ok()
+}
+
+use browser::Browser;
+use engine::Wake;
+use std::{
+    error::Error,
+    time::{Duration, Instant},
+};
+use winit::{
+    application::ApplicationHandler,
+    event::WindowEvent,
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    window::{Window, WindowId},
+};
+
+use servo_browser::options::Options;
+
+struct App {
+    options: Options,
+    browser: Option<Browser>,
+    proxy: winit::event_loop::EventLoopProxy<Wake>,
+    failure: Option<String>,
+}
+
+impl ApplicationHandler<Wake> for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.browser.is_some() {
+            return;
+        }
+        let result = event_loop
+            .create_window(
+                Window::default_attributes()
+                    .with_title(crate::brand::APP_NAME)
+                    .with_window_icon(browser_icon())
+                    .with_transparent(cfg!(target_os = "macos"))
+                    .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 850.0))
+                    .with_min_inner_size(winit::dpi::LogicalSize::new(720.0, 480.0)),
+            )
+            .map_err(|e| e.to_string())
+            .and_then(|window| Browser::new(window, event_loop, self.proxy.clone(), &self.options));
+        match result {
+            Ok(browser) => self.browser = Some(browser),
+            Err(error) => {
+                self.failure = Some(error);
+                event_loop.exit();
+            }
+        }
+    }
+
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
+        if let Some(browser) = &mut self.browser {
+            browser.sync_tool_window(event_loop);
+            match &event {
+                Wake::Media(action) => browser.media_action(Some(action.clone())),
+                Wake::ToggleMedia => browser.media_action(None),
+                _ => {}
+            }
+            if matches!(event, Wake::Servo) {
+                // Servo also wakes for paint acknowledgements. Repainting here
+                // feeds those acknowledgements back into another full paint,
+                // keeping software renderers busy even on a static page.
+                // Delegates request a redraw when a new frame or UI change is ready.
+                browser.pump();
+            } else {
+                browser.window.request_redraw();
+                if let Some(window) = &browser.tool_window {
+                    window.window.request_redraw();
+                }
+            }
+            browser.check_background_tasks(event_loop);
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        let Some(browser) = &mut self.browser else {
+            return;
+        };
+        browser.sync_tool_window(event_loop);
+        if browser
+            .tool_window
+            .as_ref()
+            .is_some_and(|w| w.window.id() == window_id)
+        {
+            browser.tool_window_event(event);
+            return;
+        }
+        if window_id != browser.window.id() {
+            return;
+        }
+        if matches!(event, WindowEvent::CloseRequested) {
+            browser.save();
+            event_loop.exit();
+            return;
+        }
+        browser.handle_event(event);
+        if browser.quit_requested {
+            browser.save();
+            event_loop.exit();
+        }
+        browser.check_background_tasks(event_loop);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if let Some(browser) = &mut self.browser {
+            browser.sync_tool_window(event_loop);
+            browser.tick();
+            browser.check_background_tasks(event_loop);
+            let delay = if browser.animating() || browser.smoke_testing() || browser.tools.pending()
+            {
+                16
+            } else {
+                250
+            };
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(delay),
+            ));
+        }
+    }
+
+    fn exiting(&mut self, _: &ActiveEventLoop) {
+        if let Some(mut browser) = self.browser.take() {
+            browser.shutdown();
+        }
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    #[cfg(feature = "multiprocess")]
+    {
+        let mut args = std::env::args();
+        while let Some(arg) = args.next() {
+            if arg == "--content-process" {
+                servo::run_content_process(args.next().ok_or("Missing content process token")?);
+                return Ok(());
+            }
+        }
+    }
+    let options = Options::parse_from(std::env::args().skip(1)).map_err(std::io::Error::other)?;
+    if options.help {
+        println!(
+            "Lotse Browser\nUsage: servo-browser [--profile-dir PATH] [--capture FILE.png] [URL]\n  --remote-devtools PORT · --webdriver-port PORT\n  --multiprocess (requires --features multiprocess)\n  Native tests require --features test-harness and an isolated --profile-dir.\n  Test modes: --smoke-test, --download-test, --toolbox-test, --theme-test, --capabilities-test"
+        );
+        return Ok(());
+    }
+    #[cfg(feature = "media")]
+    {
+        let profile = options
+            .profile_dir
+            .clone()
+            .unwrap_or_else(crate::profile::Profile::default_dir);
+        let engine = profile.join("engine");
+        std::fs::create_dir_all(&engine)?;
+        // This runs before winit, Servo or worker threads are started. macOS and
+        // Windows load Servo's explicit plugin list. Linux needs system plugin
+        // discovery, since Servo uses distribution-provided GStreamer plugins.
+        unsafe {
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            if std::env::var_os("GST_PLUGIN_SYSTEM_PATH_1_0").is_none() {
+                std::env::set_var("GST_PLUGIN_SYSTEM_PATH_1_0", "");
+            }
+            if std::env::var_os("GST_REGISTRY_1_0").is_none() {
+                std::env::set_var("GST_REGISTRY_1_0", engine.join("gstreamer-registry.bin"));
+            }
+        }
+    }
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .map_err(|_| std::io::Error::other("Cannot install TLS provider"))?;
+    let event_loop = EventLoop::<Wake>::with_user_event().build()?;
+    let mut app = App {
+        options,
+        browser: None,
+        proxy: event_loop.create_proxy(),
+        failure: None,
+    };
+    event_loop.run_app(&mut app)?;
+    if let Some(error) = app.failure {
+        return Err(std::io::Error::other(error).into());
+    }
+    Ok(())
+}
+
+mod chrome;
+mod download_actions;
+mod navigation_adapter;
+mod permission_adapter;

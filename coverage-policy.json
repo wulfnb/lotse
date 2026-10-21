@@ -1,0 +1,46 @@
+{
+  "target_line_percent": 100,
+  "include": [
+    "src/**/*.rs",
+    "src/**/*.js",
+    "docker/**/*.py",
+    "docker/**/*.js",
+    "docker/**/*.sh",
+    "scripts/**/*.py",
+    "scripts/**/*.sh"
+  ],
+  "test_only": [
+    "src/*_tests.rs",
+    "src/smoke.rs",
+    "src/download_test.rs",
+    "src/theme_test.rs",
+    "src/capabilities_test.rs",
+    "src/toolbox_test.rs",
+    "scripts/native-tests.py",
+    "scripts/docker-auth-test.py",
+    "scripts/docker-*-test.sh",
+    "scripts/docker-smoke.sh",
+    "scripts/check.sh",
+    "scripts/coverage.sh",
+    "scripts/javascript-coverage.sh",
+    "scripts/coverage-rustc.sh",
+    "scripts/desktop-coverage.py",
+    "scripts/check-coverage.py",
+    "scripts/coverage-inventory.py",
+    "scripts/coverage_sources.py"
+  ],
+  "declaration_only": [
+    "src/lib.rs",
+    "src/brand.rs"
+  ],
+  "third_party": [
+    "vendor/**"
+  ],
+  "required_builds": [
+    "aarch64-apple-darwin:desktop",
+    "aarch64-unknown-linux-gnu:desktop",
+    "x86_64-unknown-linux-gnu:desktop",
+    "x86_64-pc-windows-msvc:core"
+  ],
+  "policy": "Every first-party executable file must have a line measurement. Missing files and untested build configurations fail completeness; they never count as 100%. Branch coverage is informational. Test drivers and third-party source are listed separately."
+}

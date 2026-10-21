@@ -1,0 +1,199 @@
+name: CD - Build & Publish Test Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Custom tag name for the release (e.g. test-preview)'
+        required: false
+        default: 'test-preview'
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-macos:
+    name: Package macOS Bundle (ARM64)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lotse-cd-macos"
+      - name: Native system dependencies
+        run: brew install pkgconf gstreamer libnice-gstreamer
+      - name: Build and bundle Lotse.app
+        run: bash scripts/package-macos.sh
+      - name: Create DMG and ZIP distributions
+        run: |
+          mkdir -p dist
+          # Create compressed Apple Disk Image (.dmg)
+          hdiutil create -volname "Lotse Browser" -srcfolder target/Lotse.app -ov -format UDZO dist/Lotse-macOS-arm64.dmg
+          # Create standard portable archive (.zip)
+          ditto -c -k --sequesterRsrc --keepParent target/Lotse.app dist/Lotse-macOS-arm64.zip
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: macos-dist
+          path: dist/*
+
+  build-linux-and-docker:
+    name: Build Linux Package & Docker (GHCR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set lowercased image repository name
+        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push production Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:test
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Extract standalone Linux binary from built image
+        run: |
+          mkdir -p dist
+          container_id=$(docker create "${{ env.IMAGE_NAME }}:${{ github.sha }}")
+          docker cp "$container_id:/usr/local/bin/servo-browser" ./servo-browser-linux
+          docker rm "$container_id"
+          chmod 755 ./servo-browser-linux
+          bash scripts/package-linux.sh ./servo-browser-linux
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: linux-dist
+          path: dist/Lotse-Linux-x86_64.tar.gz
+
+  build-windows:
+    name: Package Windows (x64)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lotse-cd-windows"
+      - name: Build Windows release executable
+        run: cargo build --release --locked --no-default-features
+      - name: Package Windows ZIP archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist\lotse-windows-x64
+          if (Test-Path "target\release\servo-browser.exe") {
+            Copy-Item "target\release\servo-browser.exe" -Destination "dist\lotse-windows-x64\"
+          }
+          if (Test-Path "LICENSE") {
+            Copy-Item "LICENSE" -Destination "dist\lotse-windows-x64\"
+          }
+          if (Test-Path "README.md") {
+            Copy-Item "README.md" -Destination "dist\lotse-windows-x64\"
+          }
+          Compress-Archive -Path "dist\lotse-windows-x64\*" -DestinationPath "dist\Lotse-Windows-x64.zip" -Force
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: windows-dist
+          path: dist/Lotse-Windows-x64.zip
+
+  publish-release:
+    name: Publish GitHub Test Release
+    needs: [build-macos, build-linux-and-docker, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set lowercased image repository name
+        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+      - name: Download all release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+      - name: Prepare distribution directory & checksums
+        run: |
+          mkdir -p release-files
+          cp release-artifacts/* release-files/ || true
+          cd release-files
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Determine Release Tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "RELEASE_TAG=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "RELEASE_TAG=test-preview" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create or Update GitHub Pre-Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.RELEASE_TAG }}
+          name: "Lotse Test Release (${{ steps.tag.outputs.RELEASE_TAG }})"
+          prerelease: true
+          make_latest: false
+          files: |
+            release-files/*
+          body: |
+            ## Lotse Browser — Test / Preview Release
+
+            This is an automated test release built directly from commit `${{ github.sha }}` on branch `${{ github.ref_name }}`.
+
+            ### Multi-Platform Downloads
+
+            | Platform | Distribution Package | Description |
+            | :--- | :--- | :--- |
+            | **macOS (Apple Silicon)** | `Lotse-macOS-arm64.dmg` / `.zip` | Native macOS app bundle (`Lotse.app`) with GStreamer media plugins and AppKit vibrancy |
+            | **Linux (x86_64)** | `Lotse-Linux-x86_64.tar.gz` | Portable Linux archive with standalone launcher and desktop entry |
+            | **Windows (x64)** | `Lotse-Windows-x64.zip` | Portable Windows archive with `servo-browser.exe` and documentation |
+
+            ### Docker Container (noVNC / HTTPS Gateway)
+
+            You can pull and launch the full containerized browser with its secure authenticated web viewer:
+
+            ```sh
+            docker pull ${{ env.IMAGE_NAME }}:latest
+
+            docker run -d \
+              --name lotse-browser \
+              -p 7443:7443 \
+              -e SERVO_WEB_USER=servo \
+              -e SERVO_WEB_PASSWORD='your-strong-password' \
+              -v lotse-profile:/config \
+              ${{ env.IMAGE_NAME }}:latest
+            ```
+
+            Then navigate to **https://localhost:7443** in your local browser and sign in.
+
+            ### Integrity & Checksums
+
+            All release assets are signed and verified in `SHA256SUMS.txt`.
+

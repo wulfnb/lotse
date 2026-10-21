@@ -1,0 +1,17 @@
+[run]
+branch = True
+source = docker, scripts
+omit = tests/*
+data_file = target/coverage/python/.coverage
+
+[report]
+show_missing = True
+
+[html]
+directory = target/coverage/python/html
+
+[xml]
+output = target/coverage/python/coverage.xml
+
+[json]
+output = target/coverage/python/coverage.json

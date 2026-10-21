@@ -1,0 +1,60 @@
+[package]
+name = "servo-browser"
+version = "0.1.0-alpha.1"
+edition = "2024"
+rust-version = "1.95"
+description = "Lotse — a native Rust browser powered by Servo, with movable tabs"
+license = "MPL-2.0"
+
+[features]
+default = ["desktop", "brotli-streams", "media"]
+desktop = ["dep:egui", "dep:egui_glow", "dep:winit", "dep:servo", "dep:euclid", "dep:dpi", "dep:rustls", "dep:arboard", "dep:servo-devtools-traits", "dep:servo-base", "dep:crossbeam-channel", "dep:webdriver", "dep:base64", "dep:image", "dep:http", "dep:libc", "dep:pkcs1", "dep:objc2", "dep:block2", "dep:objc2-app-kit", "dep:objc2-foundation"]
+test-harness = ["desktop"]
+brotli-streams = ["desktop", "servo/brotli-compression-stream"]
+multiprocess = ["desktop", "servo/multiprocess"]
+media = ["desktop", "servo/media-gstreamer"]
+
+[[bin]]
+name = "servo-browser"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[dependencies]
+egui = { optional = true, version = "=0.37.0", features = ["default_fonts"] }
+egui_glow = { optional = true, version = "=0.37.0", features = ["winit"] }
+winit = { version = "0.30.13", optional = true }
+servo = { optional = true, version = "=0.7.0", default-features = false, features = ["bundled", "js_jit", "webcrypto", "webgl"] }
+euclid = { version = "0.22", optional = true }
+dpi = { version = "0.1", optional = true }
+url = "2.5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "6"
+rustls = { optional = true, version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+arboard = { version = "3", optional = true }
+servo-devtools-traits = { version = "=0.7.0", optional = true }
+servo-base = { version = "=0.7.0", optional = true }
+crossbeam-channel = { version = "0.5", optional = true }
+webdriver = { version = "=0.54.0", optional = true }
+base64 = { version = "0.22", optional = true }
+image = { optional = true,version="0.25",default-features=false,features=["png"]}
+http = { version = "1", optional = true }
+chrono = "0.4.45"
+libc = { version = "0.2", optional = true }
+# Servo's RSA prerelease requires rc.4; rc.5 changes its public key representation.
+pkcs1 = { version = "=0.8.0-rc.4", optional = true }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[patch.crates-io]
+# See vendor/README.md for the Servo/epaint vello_cpu feature-unification fix.
+epaint = { path = "vendor/epaint" }
+servo = { path = "vendor/servo" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.5", optional = true }
+block2 = { version = "0.6.2", optional = true }
+objc2-app-kit = { optional = true,version="0.3.2",default-features=false,features=["std","NSVisualEffectView","NSView","NSWindow","NSColor","NSAppearance","NSGraphics","NSResponder","NSScreen"]}
+objc2-foundation = { optional = true,version="0.3.2",default-features=false,features=["std","NSGeometry","NSString","NSDictionary","NSValue"]}

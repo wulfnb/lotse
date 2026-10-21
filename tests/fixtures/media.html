@@ -1,0 +1,16 @@
+<!doctype html><meta charset=utf-8><title>Servo media fixture</title>
+<style>body{font:18px system-ui;background:#20202b;color:white;padding:30px}video{width:480px;height:270px;background:black}pre{white-space:pre-wrap}</style>
+<h1>Real GStreamer playback</h1><video id=video autoplay muted loop playsinline src=media.webm></video><audio id=audio autoplay muted loop src=media.wav></audio><pre id=report></pre>
+<script>
+window.mediaReport={};
+if (navigator.mediaSession) {
+ navigator.mediaSession.metadata = new MediaMetadata({title:'Servo media test',artist:'Local fixture',album:'Native playback'});
+ navigator.mediaSession.setActionHandler('pause',()=>{video.pause();audio.pause();navigator.mediaSession.playbackState='paused'});
+ navigator.mediaSession.setActionHandler('play',()=>{video.play();audio.play();navigator.mediaSession.playbackState='playing'});
+ video.onplaying=()=>navigator.mediaSession.playbackState='playing';
+}
+setInterval(()=>{
+ window.mediaReport={videoTime:video.currentTime,audioTime:audio.currentTime,videoWidth:video.videoWidth,videoHeight:video.videoHeight,videoState:video.readyState,audioState:audio.readyState,videoError:video.error&&video.error.message,audioError:audio.error&&audio.error.message};
+ report.textContent=JSON.stringify(mediaReport,null,2);
+},100);
+</script>

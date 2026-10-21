@@ -1,0 +1,1436 @@
+use crate::{
+    browser::Browser,
+    profile::{self, TabLayout},
+};
+use egui::{Color32, Frame, Id, RichText, Stroke, Ui};
+
+#[cfg(test)]
+#[path = "ui_tests.rs"]
+mod tests;
+
+pub fn style(ctx: &egui::Context) {
+    let colors = crate::theme::palette(ctx);
+    let mode = if colors.dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    };
+    let mut style = (*ctx.style_of(mode)).clone();
+    style.visuals = if colors.dark {
+        egui::Visuals::dark()
+    } else {
+        egui::Visuals::light()
+    };
+    style.visuals.panel_fill = colors.chrome;
+    style.visuals.window_fill = colors.inset;
+    style.visuals.window_stroke = Stroke::new(1.0, colors.border);
+    style.visuals.window_corner_radius = egui::CornerRadius::same(12);
+    style.visuals.menu_corner_radius = egui::CornerRadius::same(10);
+    style.visuals.extreme_bg_color = colors.inset;
+    style.visuals.text_edit_bg_color = Some(colors.chrome);
+    style.visuals.override_text_color = Some(colors.text);
+    style.visuals.selection.bg_fill = colors.selected;
+    style.visuals.selection.stroke = Stroke::new(1.0, colors.accent);
+    for (widget, fill, foreground) in [
+        (
+            &mut style.visuals.widgets.noninteractive,
+            colors.chrome,
+            colors.muted,
+        ),
+        (
+            &mut style.visuals.widgets.inactive,
+            colors.surface,
+            colors.text,
+        ),
+        (
+            &mut style.visuals.widgets.hovered,
+            colors.hover,
+            colors.text,
+        ),
+        (
+            &mut style.visuals.widgets.active,
+            colors.selected,
+            colors.accent,
+        ),
+        (
+            &mut style.visuals.widgets.open,
+            colors.selected,
+            colors.text,
+        ),
+    ] {
+        widget.bg_fill = fill;
+        widget.weak_bg_fill = fill;
+        widget.bg_stroke = Stroke::NONE;
+        widget.fg_stroke = Stroke::new(1.0, foreground);
+        widget.corner_radius = egui::CornerRadius::same(7);
+        widget.expansion = 0.0;
+    }
+    style.visuals.faint_bg_color = colors.surface;
+    style.visuals.code_bg_color = colors.inset;
+    style.visuals.hyperlink_color = colors.accent;
+    style.visuals.warn_fg_color = colors.amber;
+    style.visuals.error_fg_color = colors.danger;
+    style.spacing.button_padding = egui::vec2(10.0, 7.0);
+    style.spacing.item_spacing = egui::vec2(7.0, 7.0);
+    style
+        .text_styles
+        .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+    style
+        .text_styles
+        .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+    ctx.set_theme(mode);
+    ctx.set_style_of(mode, style);
+}
+
+fn paint_icon(painter: &egui::Painter, center: egui::Pos2, symbol: &str, color: Color32) {
+    let stroke = Stroke::new(1.6, color);
+    let point = |x: f32, y: f32| center + egui::vec2(x, y);
+    let line = |points: &[(f32, f32)]| {
+        painter.add(egui::Shape::line(
+            points.iter().map(|&(x, y)| point(x, y)).collect(),
+            stroke,
+        ));
+    };
+    match symbol {
+        "←" | "→" => {
+            let direction = if symbol == "←" { -1.0 } else { 1.0 };
+            line(&[(-7.0, 0.0), (7.0, 0.0)]);
+            line(&[
+                (direction * 2.0, -5.0),
+                (direction * 7.0, 0.0),
+                (direction * 2.0, 5.0),
+            ]);
+        }
+        "↓" => {
+            line(&[(0.0, -7.0), (0.0, 5.0)]);
+            line(&[(-5.0, 0.0), (0.0, 5.0), (5.0, 0.0)]);
+            line(&[(-7.0, 8.0), (7.0, 8.0)]);
+        }
+        "↻" => {
+            let radius = 7.5;
+            let end = 330.0_f32.to_radians();
+            let points = (0..=32)
+                .map(|i| {
+                    let angle = (40.0 + i as f32 * 290.0 / 32.0).to_radians();
+                    point(angle.cos() * radius, angle.sin() * radius)
+                })
+                .collect();
+            painter.add(egui::Shape::line(points, stroke));
+            let tip = point(end.cos() * radius, end.sin() * radius);
+            let tangent = egui::vec2(-end.sin(), end.cos());
+            let normal = egui::vec2(end.cos(), end.sin());
+            painter.add(egui::Shape::line(
+                vec![
+                    tip - tangent * 4.5 + normal * 3.0,
+                    tip,
+                    tip - tangent * 4.5 - normal * 3.0,
+                ],
+                stroke,
+            ));
+        }
+        "×" => {
+            line(&[(-5.0, -5.0), (5.0, 5.0)]);
+            line(&[(-5.0, 5.0), (5.0, -5.0)]);
+        }
+        "☆" | "★" => {
+            let points = (0..10)
+                .map(|i| {
+                    let angle = (i as f32 * 36.0 - 90.0).to_radians();
+                    let radius = if i % 2 == 0 { 9.0 } else { 4.0 };
+                    point(angle.cos() * radius, angle.sin() * radius)
+                })
+                .collect();
+            painter.add(egui::Shape::Path(egui::epaint::PathShape {
+                points,
+                closed: true,
+                fill: if symbol == "★" {
+                    color
+                } else {
+                    Color32::TRANSPARENT
+                },
+                stroke: stroke.into(),
+            }));
+        }
+        "☰" => {
+            for y in [-5.0, 0.0, 5.0] {
+                line(&[(-7.0, y), (7.0, y)]);
+            }
+        }
+        "▤" | "▥" | "⌘" => {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(center, egui::vec2(18.0, 16.0)),
+                2,
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            if symbol == "▥" {
+                line(&[(-3.0, -7.0), (-3.0, 7.0)]);
+            } else if symbol == "▤" {
+                line(&[(-8.0, -2.0), (8.0, -2.0)]);
+            } else {
+                line(&[(-5.0, -3.0), (-2.0, 0.0), (-5.0, 3.0)]);
+                line(&[(1.0, 4.0), (5.0, 4.0)]);
+            }
+        }
+        "◷" => {
+            painter.circle_stroke(center, 8.0, stroke);
+            line(&[(0.0, -5.0), (0.0, 0.0), (4.0, 2.0)]);
+        }
+        "⋯" => {
+            for x in [-6.0, 0.0, 6.0] {
+                painter.circle_filled(point(x, 0.0), 1.8, color);
+            }
+        }
+        _ => {
+            painter.circle_stroke(center, 8.0, stroke);
+            painter.circle_filled(center, 3.0, color);
+        }
+    }
+}
+
+fn brand_icon(ui: &mut Ui) {
+    let id = egui::Id::unique("browser-brand-icon");
+    let cached = ui
+        .ctx()
+        .data(|data| data.get_temp::<egui::TextureHandle>(id));
+    let texture = cached.or_else(|| {
+        let image = image::load_from_memory(include_bytes!("../assets/icons/browser-icon-256.png"))
+            .ok()?
+            .into_rgba8();
+        let size = [image.width() as usize, image.height() as usize];
+        let texture = ui.ctx().load_texture(
+            "browser-brand-icon",
+            egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw()),
+            egui::TextureOptions::LINEAR,
+        );
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(id, texture.clone()));
+        Some(texture)
+    });
+    if let Some(texture) = texture {
+        ui.add(egui::Image::new(&texture).fit_to_exact_size(egui::vec2(28.0, 28.0)));
+    }
+}
+
+pub(crate) fn icon(ui: &mut Ui, symbol: &str, help: &str) -> egui::Response {
+    let colors = crate::theme::palette(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::click());
+    if response.hovered() && ui.is_enabled() {
+        ui.painter().rect_filled(rect, 8, colors.hover);
+    }
+    paint_icon(
+        ui.painter(),
+        rect.center(),
+        symbol,
+        if ui.is_enabled() {
+            colors.text
+        } else {
+            colors.muted.gamma_multiply(0.4)
+        },
+    );
+    response.on_hover_text(help)
+}
+
+fn shorten(text: &str, max: usize) -> String {
+    let mut chars = text.chars();
+    let mut short: String = chars.by_ref().take(max).collect();
+    if chars.next().is_some() {
+        short.push('…');
+    }
+    short
+}
+
+// Mask only the corners after Servo's rectangular GPU blit.
+pub(crate) fn page_corners(painter: &egui::Painter, rect: egui::Rect) {
+    let colors = crate::theme::palette(painter.ctx());
+    if colors.glass {
+        use egui_glow::glow::{self, HasContext};
+        let rgba = colors.chrome.to_array().map(|v| v as f32 / 255.0);
+        painter.add(egui::PaintCallback {
+            rect,
+            callback: std::sync::Arc::new(egui_glow::CallbackFn::new(move |info, painter| {
+                let gl = painter.gl();
+                let viewport = info.viewport_in_pixels();
+                let radius = (12.0 * info.pixels_per_point)
+                    .round()
+                    .min(viewport.width_px as f32 / 2.0)
+                    .min(viewport.height_px as f32 / 2.0) as i32;
+                // Clear rather than alpha-blend: the website is opaque, while the
+                // rounded corner belongs to the translucent browser chrome.
+                unsafe {
+                    let enabled = gl.is_enabled(glow::SCISSOR_TEST);
+                    let mut scissor = [0; 4];
+                    let mut clear = [0.0; 4];
+                    gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor);
+                    gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut clear);
+                    gl.enable(glow::SCISSOR_TEST);
+                    gl.clear_color(rgba[0], rgba[1], rgba[2], rgba[3]);
+                    for row in 0..radius {
+                        let distance = radius as f32 - row as f32 - 0.5;
+                        let width = (radius as f32
+                            - ((radius * radius) as f32 - distance * distance).sqrt())
+                        .ceil() as i32;
+                        for x in [
+                            viewport.left_px,
+                            viewport.left_px + viewport.width_px - width,
+                        ] {
+                            for y in [
+                                viewport.from_bottom_px + row,
+                                viewport.from_bottom_px + viewport.height_px - 1 - row,
+                            ] {
+                                gl.scissor(x, y, width, 1);
+                                gl.clear(glow::COLOR_BUFFER_BIT);
+                            }
+                        }
+                    }
+                    gl.scissor(scissor[0], scissor[1], scissor[2], scissor[3]);
+                    if !enabled {
+                        gl.disable(glow::SCISSOR_TEST);
+                    }
+                    gl.clear_color(clear[0], clear[1], clear[2], clear[3]);
+                }
+            })),
+        });
+        return;
+    }
+    let radius = 12.0_f32.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    for (corner, sx, sy) in [
+        (rect.left_top(), 1.0, 1.0),
+        (rect.right_top(), -1.0, 1.0),
+        (rect.left_bottom(), 1.0, -1.0),
+        (rect.right_bottom(), -1.0, -1.0),
+    ] {
+        let mut points = vec![corner];
+        for i in 0..=12 {
+            let angle = i as f32 / 12.0 * std::f32::consts::FRAC_PI_2;
+            points.push(
+                corner
+                    + egui::vec2(
+                        sx * radius * (1.0 - angle.cos()),
+                        sy * radius * (1.0 - angle.sin()),
+                    ),
+            );
+        }
+        painter.add(egui::Shape::convex_polygon(
+            points,
+            colors.chrome,
+            Stroke::NONE,
+        ));
+    }
+}
+
+#[derive(Clone, Copy)]
+enum TabAction {
+    Select(usize),
+    Close(usize),
+    Move(usize, usize),
+    New,
+    Layout,
+}
+
+impl Browser {
+    pub fn ui(&mut self, ui: &mut Ui) {
+        let colors = crate::theme::palette(ui.ctx());
+        if !self.fullscreen {
+            egui::Panel::top("navigation")
+                .frame(
+                    Frame::new()
+                        .fill(colors.chrome)
+                        .inner_margin(egui::Margin::symmetric(10, 8)),
+                )
+                .show(ui, |ui| {
+                    if self.profile().layout == TabLayout::Top {
+                        egui::ScrollArea::horizontal()
+                            .id_salt("top_tabs")
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| self.tab_strip(ui, false));
+                            });
+                        ui.add_space(6.0);
+                    }
+                    self.navigation(ui);
+                });
+            if self.profile().layout == TabLayout::Side {
+                let panel = egui::Panel::left("tab_sidebar")
+                    .resizable(true)
+                    .default_size(self.profile().sidebar_width)
+                    .min_size(180.0)
+                    .max_size(380.0)
+                    .frame(Frame::new().fill(colors.chrome).inner_margin(12));
+                let shown = panel.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        brand_icon(ui);
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(crate::brand::NAME).strong().size(15.0));
+                            ui.label(
+                                RichText::new("Your space on the web")
+                                    .size(11.0)
+                                    .color(colors.muted),
+                            );
+                        });
+                    });
+                    ui.add_space(16.0);
+                    let height = (ui.available_height() - 75.0).max(80.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(height)
+                        .id_salt("side_tabs")
+                        .show(ui, |ui| self.tab_strip(ui, true));
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                        ui.horizontal(|ui| {
+                            if icon(ui, "☰", "Switch to tabs on top").clicked() {
+                                self.toggle_layout();
+                            }
+                            if icon(ui, "☆", "Bookmarks").clicked() {
+                                self.chrome.show_bookmarks = !self.chrome.show_bookmarks;
+                                self.chrome.show_history = false;
+                                self.chrome.library_query.clear();
+                            }
+                            if icon(ui, "◷", "History").clicked() {
+                                self.chrome.show_history = !self.chrome.show_history;
+                                self.chrome.show_bookmarks = false;
+                                self.chrome.library_query.clear();
+                            }
+                            if icon(ui, "⌘", "Developer toolbox (F12)").clicked() {
+                                self.toggle_developer_tools();
+                            }
+                        });
+                        ui.label(
+                            RichText::new(format!(
+                                "{} {} · Servo 0.7",
+                                self.session().tabs().len(),
+                                if self.session().tabs().len() == 1 {
+                                    "tab"
+                                } else {
+                                    "tabs"
+                                }
+                            ))
+                            .size(11.0)
+                            .color(colors.muted),
+                        );
+                    });
+                });
+                let width = shown.response.rect.width();
+                if (self.profile().sidebar_width - width).abs() > 1.0 {
+                    self.apply(servo_browser::application::Command::SidebarWidth(width));
+                    self.changed();
+                }
+            }
+            egui::Panel::bottom("page_status")
+                .frame(
+                    Frame::new()
+                        .fill(colors.chrome)
+                        .inner_margin(egui::Margin::symmetric(12, 4)),
+                )
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let status_width = (ui.available_width() - 310.0).max(24.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(status_width, 20.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                if let Some(status) = self.status.clone() {
+                                    ui.add_sized(
+                                        egui::vec2((ui.available_width() - 24.0).max(0.0), 20.0),
+                                        egui::Label::new(
+                                            RichText::new(&status).size(11.0).color(colors.danger),
+                                        )
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(status);
+                                    if ui.small_button("×").clicked() {
+                                        self.status = None;
+                                    }
+                                } else {
+                                    let status =
+                                        self.tab().view.status_text().unwrap_or_else(|| {
+                                            if self.tab().view.load_status()
+                                                == servo::LoadStatus::Complete
+                                            {
+                                                "Servo · WebRender".into()
+                                            } else {
+                                                "Loading page…".into()
+                                            }
+                                        });
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(status).size(11.0).color(colors.muted),
+                                        )
+                                        .truncate(),
+                                    );
+                                }
+                            },
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("+").clicked() {
+                                self.zoom(1.1);
+                            }
+                            if ui
+                                .small_button(format!(
+                                    "{}%",
+                                    (self.tab().view.page_zoom() * 100.0).round()
+                                ))
+                                .clicked()
+                            {
+                                self.reset_zoom();
+                            }
+                            if ui.small_button("−").clicked() {
+                                self.zoom(1.0 / 1.1);
+                            }
+                            ui.add_space(10.0);
+                            ui.label(
+                                RichText::new(self.resources.label())
+                                    .size(11.0)
+                                    .color(colors.muted),
+                            )
+                            .on_hover_text(self.resources.description());
+                        });
+                    });
+                });
+        }
+        if self.chrome.show_console {
+            self.devtools(ui);
+        }
+        self.collections(ui);
+        egui::CentralPanel::default()
+            .frame(Frame::new().fill(colors.chrome))
+            .show(ui, |ui| self.viewport(ui));
+        let ctx = ui.ctx().clone();
+        self.dialogs(&ctx);
+        self.downloads_window(&ctx);
+    }
+
+    fn navigation(&mut self, ui: &mut Ui) {
+        let colors = crate::theme::palette(ui.ctx());
+        ui.horizontal(|ui| {
+            if icon(
+                ui,
+                if self.profile().layout == TabLayout::Side {
+                    "▤"
+                } else {
+                    "▥"
+                },
+                "Switch top / sidebar tabs (Cmd/Ctrl+Shift+L)",
+            )
+            .clicked()
+            {
+                self.toggle_layout();
+            }
+            if ui
+                .add_enabled_ui(self.tab().view.can_go_back(), |ui| {
+                    icon(ui, "←", "Back (Alt+Left)")
+                })
+                .inner
+                .clicked()
+            {
+                self.traverse(false);
+            }
+            if ui
+                .add_enabled_ui(self.tab().view.can_go_forward(), |ui| {
+                    icon(ui, "→", "Forward (Alt+Right)")
+                })
+                .inner
+                .clicked()
+            {
+                self.traverse(true);
+            }
+            let reload = icon(ui, "↻", "Reload (Cmd/Ctrl+R)");
+            self.chrome.reload_rect = reload.rect;
+            if reload.clicked() {
+                self.reload();
+            }
+            let url = self.tab().view.url();
+            let protocol = url.as_ref().map(|u| u.scheme()).unwrap_or("");
+            ui.label(
+                RichText::new(match protocol {
+                    "https" => "HTTPS",
+                    "http" => "HTTP",
+                    "file" => "FILE",
+                    _ => "PAGE",
+                })
+                .size(10.0)
+                .color(colors.muted),
+            )
+            .on_hover_text(match protocol {
+                "https" => "HTTPS connection. Certificates are validated by Servo.",
+                "http" => "This connection is not encrypted.",
+                _ => "Local or internal document.",
+            });
+            let width = (ui.available_width() - 126.0).max(100.0);
+            let response = ui.add_sized(
+                [width, 34.0],
+                egui::TextEdit::singleline(&mut self.chrome.address)
+                    .id(Id::unique("address"))
+                    .hint_text("Search Google or enter address")
+                    .frame(
+                        Frame::new()
+                            .fill(colors.inset)
+                            .stroke(Stroke::new(1.0, colors.border))
+                            .corner_radius(17)
+                            .inner_margin(egui::Margin::symmetric(13, 7)),
+                    ),
+            );
+            if self.chrome.focus_address {
+                response.request_focus();
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(self.chrome.address.chars().count()),
+                        )));
+                    state.store(ui.ctx(), response.id);
+                }
+                self.chrome.focus_address = false;
+            }
+            if response.has_focus() {
+                self.chrome.page_focused = false;
+            }
+            if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                let address = self.chrome.address.clone();
+                self.navigate(&address);
+            }
+            let starred = self.profile()
+                .bookmarks
+                .iter()
+                .any(|b| b.url == self.tab().url());
+            if icon(
+                ui,
+                if starred { "★" } else { "☆" },
+                "Bookmark page (Cmd/Ctrl+D)",
+            )
+            .clicked()
+            {
+                self.bookmark();
+            }
+            if icon(ui,"↓","Downloads").clicked(){self.download_ui.open = !self.download_ui.open;}
+            let menu = icon(ui, "⋯", "Menu");
+            egui::Popup::menu(&menu).show(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new("New tab").shortcut_text(if cfg!(target_os = "macos") {
+                            "Cmd+T"
+                        } else {
+                            "Ctrl+T"
+                        }),
+                    )
+                    .clicked()
+                {
+                    self.add_tab("lotse://newtab");
+                    self.chrome.focus_address = true;
+                    ui.close();
+                }
+                if ui.button("Reopen closed tab").clicked() {
+                    if let Some(url) = self.chrome.closed_tabs.pop() {
+                        self.add_tab(&url);
+                    }
+                    ui.close();
+                }
+                ui.separator();
+                if ui.button("Tabs on top").clicked() {
+                    self.apply(servo_browser::application::Command::Layout(TabLayout::Top));
+                    self.changed();
+                    ui.close();
+                }
+                if ui.button("Tabs in sidebar").clicked() {
+                    self.apply(servo_browser::application::Command::Layout(TabLayout::Side));
+                    self.changed();
+                    ui.close();
+                }
+                ui.separator();
+                ui.menu_button("Appearance", |ui| {
+                    for theme in crate::theme::Theme::ALL {
+                        if ui
+                            .selectable_label(self.profile().theme == theme, theme.name())
+                            .clicked()
+                        {
+                            self.set_theme(ui.ctx(), theme);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.weak(if self.native_theme.is_some() {
+                        "Glass uses macOS vibrancy. Auto follows system appearance."
+                    } else {
+                        "Glass uses an opaque fallback on this platform."
+                    });
+                });
+                ui.separator();
+                if ui.button("Bookmarks").clicked() {
+                    self.chrome.show_bookmarks = true;
+                    self.chrome.show_history = false;
+                    self.chrome.library_query.clear();
+                    ui.close();
+                }
+                if ui.button("History").clicked() {
+                    self.chrome.show_history = true;
+                    self.chrome.show_bookmarks = false;
+                    self.chrome.library_query.clear();
+                    ui.close();
+                }
+                if ui.button("Downloads").clicked(){self.download_ui.open=true;ui.close();}
+                if ui.button("Download current URL…").clicked(){let url=self.tab().url();self.offer_download(&url,"");ui.close();}
+                if ui
+                    .add(egui::Button::new("Developer tools").shortcut_text("F12"))
+                    .clicked()
+                {
+                    self.toggle_developer_tools();
+                    ui.close();
+                }
+                if ui.button("Browser settings").clicked() {self.features.settings=true;ui.close();}
+                if ui.button("Site information").clicked() {self.refresh_site_data();self.features.site_info=true;ui.close();}
+                if ui.button("Save page as image").clicked() {self.screenshot_page();ui.close();}
+                if ui.button("Reader view").clicked() {self.tab().view.evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
+                if ui.button("Toggle page dark style").clicked() {self.tab().view.evaluate_javascript("(()=>{let s=document.getElementById('__servo_dark');if(s){s.remove();return} s=document.createElement('style');s.id='__servo_dark';s.textContent='html{color-scheme:dark!important;background:#171717!important;color:#eee!important}body,main,article,section,header,footer,nav{background-color:#171717!important;color:#eee!important}a{color:#a9caff!important}';document.head.appendChild(s)})()", |_|{});ui.close();}
+                if ui.button("Find in page").clicked() {self.features.find_open=true;ui.close();}
+                if ui.button("Reload without cache").clicked() {self.reload_without_cache();ui.close();}
+                if ui.button("Home").clicked() {
+                    self.navigate(profile::HOME);
+                    ui.close();
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new("Lotse · Rust + Servo 0.7.0 + egui")
+                        .small()
+                        .color(colors.muted),
+                );
+            });
+        });
+    }
+
+    fn tab_strip(&mut self, ui: &mut Ui, vertical: bool) {
+        let colors = crate::theme::palette(ui.ctx());
+        self.chrome.tab_rects.clear();
+        ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+        let mut action = None;
+        for index in 0..self.session().tabs().len() {
+            let selected = self.session().active() == index;
+            let title = self.session().tabs()[index].title();
+            let id = self.session().tabs()[index].view.id();
+            let loading = self.session().tabs()[index].view.load_status()
+                != servo::LoadStatus::Complete
+                || self.features.traversals.contains_key(&id);
+            let width = if vertical {
+                ui.available_width().max(130.0)
+            } else {
+                195.0
+            };
+            let (rect, response) =
+                ui.allocate_exact_size(egui::vec2(width, 36.0), egui::Sense::click_and_drag());
+            if selected || response.hovered() {
+                ui.painter().rect_filled(
+                    rect,
+                    18,
+                    if selected { colors.inset } else { colors.hover },
+                );
+            }
+            let label = format!(
+                "{}{}",
+                if loading { "... " } else { "" },
+                shorten(
+                    &title,
+                    if vertical {
+                        ((width - 75.0) / 7.0).max(8.0) as usize
+                    } else {
+                        18
+                    }
+                )
+            );
+            if let Some(texture) = self.favicons.get(&self.session().tabs()[index].url()) {
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + 19.0, rect.center().y),
+                    egui::vec2(16.0, 16.0),
+                );
+                ui.painter().image(
+                    texture.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            let title_rect = egui::Rect::from_min_max(
+                rect.min + egui::vec2(34.0, 0.0),
+                rect.max - egui::vec2(36.0, 0.0),
+            );
+            ui.painter()
+                .with_clip_rect(title_rect.intersect(ui.clip_rect()))
+                .text(
+                    title_rect.left_center(),
+                    egui::Align2::LEFT_CENTER,
+                    label,
+                    egui::FontId::proportional(14.0),
+                    if selected { colors.text } else { colors.muted },
+                );
+            let close_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.right() - 18.0, rect.center().y),
+                egui::vec2(26.0, 26.0),
+            );
+            let close = ui.interact(
+                close_rect,
+                ui.scope_id().with(("tab-close", id)),
+                egui::Sense::click(),
+            );
+            if close.hovered() {
+                ui.painter().rect_filled(close_rect, 7, colors.hover);
+            }
+            // The close glyph stays quieter than the title until it is targeted.
+            paint_icon(
+                ui.painter(),
+                close_rect.center(),
+                "×",
+                if close.hovered() {
+                    colors.text
+                } else {
+                    colors.muted
+                },
+            );
+            let closing = close.on_hover_text("Close tab").clicked();
+            let response = response.on_hover_text(format!(
+                "{}\n{}\nDrag to reorder · Right-click for tab options",
+                title,
+                self.session().tabs()[index].url()
+            ));
+            if response.clicked() && !closing {
+                action = Some(TabAction::Select(index));
+            }
+            if closing || response.clicked_by(egui::PointerButton::Middle) {
+                action = Some(TabAction::Close(index));
+            }
+            if response.drag_started() {
+                response.dnd_set_drag_payload(id);
+            }
+            response.context_menu(|ui| {
+                if ui.button("Close tab").clicked() {
+                    action = Some(TabAction::Close(index));
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(index > 0, egui::Button::new("Move earlier"))
+                    .clicked()
+                {
+                    action = Some(TabAction::Move(index, index - 1));
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(
+                        index + 1 < self.session().tabs().len(),
+                        egui::Button::new("Move later"),
+                    )
+                    .clicked()
+                {
+                    action = Some(TabAction::Move(index, index + 1));
+                    ui.close();
+                }
+                if ui.button("Switch top / sidebar").clicked() {
+                    action = Some(TabAction::Layout);
+                    ui.close();
+                }
+            });
+            self.chrome.tab_rects.push((id, rect));
+            if let Some(payload) = response.dnd_release_payload::<servo::WebViewId>()
+                && let Some(from) = self
+                    .session()
+                    .tabs()
+                    .iter()
+                    .position(|t| t.view.id() == *payload)
+            {
+                action = Some(TabAction::Move(from, index));
+            }
+            if response.contains_pointer()
+                && egui::DragAndDrop::has_payload_of_type::<servo::WebViewId>(ui.ctx())
+            {
+                ui.painter().rect_stroke(
+                    rect,
+                    18,
+                    Stroke::new(2.0, colors.accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if vertical {
+                ui.add_space(4.0);
+            }
+        }
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(if vertical { ui.available_width() } else { 36.0 }, 36.0),
+            egui::Sense::click(),
+        );
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 18, colors.hover);
+        }
+        // Left-aligned like the tab titles above it in the sidebar.
+        let (position, align, label) = if vertical {
+            (
+                rect.left_center() + egui::vec2(12.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                "+   New tab",
+            )
+        } else {
+            (rect.center(), egui::Align2::CENTER_CENTER, "+")
+        };
+        ui.painter().text(
+            position,
+            align,
+            label,
+            egui::FontId::proportional(14.0),
+            colors.text,
+        );
+        if response.on_hover_text("New tab (Cmd/Ctrl+T)").clicked() {
+            action = Some(TabAction::New);
+        }
+        if let Some(action) = action {
+            match action {
+                TabAction::Select(i) => self.select_tab(i),
+                TabAction::Close(i) => self.close_tab(i),
+                TabAction::New => {
+                    self.add_tab("lotse://newtab");
+                    self.chrome.focus_address = true;
+                }
+                TabAction::Layout => self.toggle_layout(),
+                TabAction::Move(from, to) => {
+                    self.move_tab(from, to);
+                }
+            }
+        }
+    }
+
+    fn collections(&mut self, ui: &mut Ui) {
+        let colors = crate::theme::palette(ui.ctx());
+        self.chrome.library_rect = egui::Rect::NOTHING;
+        if !self.chrome.show_bookmarks && !self.chrome.show_history {
+            return;
+        }
+        let mut open_url = None;
+        let mut remove = None;
+        let shown = egui::Panel::right("library")
+            .resizable(true)
+            .default_size(320.0)
+            .min_size(260.0)
+            .max_size(440.0)
+            .frame(
+                Frame::new()
+                    .fill(colors.inset)
+                    .corner_radius(12)
+                    .outer_margin(8)
+                    .inner_margin(12),
+            )
+            .show(ui, |ui| {
+                let bookmarks = self.chrome.show_bookmarks;
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.chrome.show_bookmarks, true, "Bookmarks");
+                    ui.selectable_value(&mut self.chrome.show_bookmarks, false, "History");
+                    if self.chrome.show_bookmarks != bookmarks {
+                        self.chrome.show_history = !self.chrome.show_bookmarks;
+                        self.chrome.library_query.clear();
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if icon(ui, "×", "Close library").clicked() {
+                            self.chrome.show_bookmarks = false;
+                            self.chrome.show_history = false;
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                ui.add_sized(
+                    [ui.available_width(), 32.0],
+                    egui::TextEdit::singleline(&mut self.chrome.library_query)
+                        .hint_text("Search title or address"),
+                );
+                ui.add_space(6.0);
+                let entry_count = if self.chrome.show_bookmarks {
+                    self.profile().bookmarks.len()
+                } else {
+                    self.profile().history.len()
+                };
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} {}",
+                            entry_count,
+                            if self.chrome.show_bookmarks {
+                                "saved pages"
+                            } else {
+                                "recent pages"
+                            }
+                        ))
+                        .size(11.0)
+                        .color(colors.muted),
+                    );
+                    if !self.chrome.show_bookmarks {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_enabled(
+                                    entry_count > 0,
+                                    egui::Button::new(
+                                        RichText::new("Clear history…")
+                                            .size(11.0)
+                                            .color(colors.danger),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
+                                self.chrome.confirm_clear_history = true;
+                            }
+                        });
+                    }
+                });
+                ui.add_space(4.0);
+                let query = self.chrome.library_query.trim().to_lowercase();
+                let entries = if self.chrome.show_bookmarks {
+                    &self.profile().bookmarks
+                } else {
+                    &self.profile().history
+                };
+                let mut indices: Vec<_> = (0..entries.len()).collect();
+                if !self.chrome.show_bookmarks {
+                    indices.sort_by_key(|i| std::cmp::Reverse(entries[*i].visited_at));
+                }
+                let mut visible = 0;
+                let mut group = String::new();
+                let now = chrono::Local::now();
+                egui::ScrollArea::vertical()
+                    .id_salt("library_entries")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for index in indices {
+                            let entry = &entries[index];
+                            if !query.is_empty()
+                                && !entry.title.to_lowercase().contains(&query)
+                                && !entry.url.to_lowercase().contains(&query)
+                            {
+                                continue;
+                            }
+                            visible += 1;
+                            let (date, time) = if self.chrome.show_bookmarks {
+                                (String::new(), String::new())
+                            } else {
+                                profile::history_date(entry.visited_at, now)
+                            };
+                            if !self.chrome.show_bookmarks && group != date {
+                                group = date;
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(&group).size(11.0).color(colors.muted));
+                            }
+                            let (rect, response) = ui.allocate_exact_size(
+                                egui::vec2(ui.available_width(), 58.0),
+                                egui::Sense::click(),
+                            );
+                            let hovered = ui.rect_contains_pointer(rect);
+                            ui.painter().rect_filled(
+                                rect,
+                                8,
+                                if hovered { colors.hover } else { colors.chrome },
+                            );
+                            if let Some(texture) = self.favicons.get(&entry.url) {
+                                let icon_rect = egui::Rect::from_center_size(
+                                    egui::pos2(rect.left() + 18.0, rect.top() + 18.0),
+                                    egui::vec2(16.0, 16.0),
+                                );
+                                ui.painter().image(
+                                    texture.id(),
+                                    icon_rect,
+                                    egui::Rect::from_min_max(
+                                        egui::Pos2::ZERO,
+                                        egui::pos2(1.0, 1.0),
+                                    ),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            let text_rect = egui::Rect::from_min_max(
+                                rect.min + egui::vec2(34.0, 8.0),
+                                rect.max
+                                    - egui::vec2(
+                                        if self.chrome.show_bookmarks {
+                                            38.0
+                                        } else {
+                                            10.0
+                                        },
+                                        6.0,
+                                    ),
+                            );
+                            let painter = ui.painter().with_clip_rect(text_rect);
+                            let title = if entry.title.is_empty() {
+                                &entry.url
+                            } else {
+                                &entry.title
+                            };
+                            let title_job = egui::text::LayoutJob::simple_singleline(
+                                title.clone(),
+                                egui::FontId::proportional(13.0),
+                                colors.text,
+                            );
+                            painter.galley(
+                                text_rect.min,
+                                ui.fonts_mut(|f| f.layout_job(title_job)),
+                                colors.text,
+                            );
+                            let subtitle = if time.is_empty() {
+                                entry.url.clone()
+                            } else {
+                                format!("{time} · {}", entry.url)
+                            };
+                            painter.text(
+                                text_rect.min + egui::vec2(0.0, 23.0),
+                                egui::Align2::LEFT_TOP,
+                                subtitle,
+                                egui::FontId::proportional(11.0),
+                                colors.muted,
+                            );
+                            let mut removed = false;
+                            if self.chrome.show_bookmarks && hovered {
+                                let close_rect = egui::Rect::from_center_size(
+                                    egui::pos2(rect.right() - 19.0, rect.center().y),
+                                    egui::vec2(28.0, 28.0),
+                                );
+                                let close = ui.interact(
+                                    close_rect,
+                                    ui.scope_id().with(("remove-bookmark", index)),
+                                    egui::Sense::click(),
+                                );
+                                if close.hovered() {
+                                    ui.painter().rect_filled(close_rect, 6, colors.selected);
+                                }
+                                paint_icon(ui.painter(), close_rect.center(), "×", colors.text);
+                                if close.on_hover_text("Remove bookmark").clicked() {
+                                    remove = Some(index);
+                                    removed = true;
+                                }
+                            }
+                            if !removed
+                                && response
+                                    .on_hover_text(format!("{title}\n{}", entry.url))
+                                    .clicked()
+                            {
+                                open_url = Some(entry.url.clone());
+                            }
+                            ui.add_space(5.0);
+                        }
+                        if visible == 0 {
+                            ui.add_space(20.0);
+                            ui.label(
+                                RichText::new(if query.is_empty() {
+                                    "No pages here yet."
+                                } else {
+                                    "No matching pages."
+                                })
+                                .color(colors.muted),
+                            );
+                        }
+                    });
+            });
+        self.chrome.library_rect = shown.response.rect.shrink(8.0);
+        if let Some(index) = remove {
+            self.apply(servo_browser::application::Command::RemoveBookmark(index));
+            self.changed();
+        }
+        if let Some(url) = open_url {
+            self.navigate(&url);
+        }
+        if self.chrome.confirm_clear_history {
+            egui::Modal::new(Id::unique("confirm-clear-history")).show(ui.ctx(), |ui| {
+                ui.heading("Clear browsing history?");
+                ui.label("Remove the saved list of visited pages from this profile?");
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        self.chrome.confirm_clear_history = false;
+                    }
+                    if ui
+                        .button(RichText::new("Clear history").color(colors.danger))
+                        .clicked()
+                    {
+                        self.apply(servo_browser::application::Command::ClearHistory);
+                        self.chrome.confirm_clear_history = false;
+                        self.changed();
+                    }
+                });
+            });
+        }
+    }
+
+    fn dialogs(&mut self, ctx: &egui::Context) {
+        self.feature_ui(ctx);
+        if !self.features.prompts.is_empty() || self.features.clear_data {
+            return;
+        }
+        // Requests are answered once by consuming the corresponding Servo responder.
+        if let Some((request_id, origin, permission)) = self.pending_permission() {
+            let mut answer = None;
+            egui::Modal::new(Id::unique("site_permission")).show(ctx, |ui| {
+                ui.heading("Site permission");
+                ui.label(origin);
+                ui.label(format!("Allow access to {permission}?"));
+                ui.horizontal(|ui| {
+                    if ui.button("Deny").clicked() {
+                        answer = Some(false);
+                    }
+                    if ui.button("Allow once").clicked() {
+                        answer = Some(true);
+                    }
+                });
+            });
+            if let Some(allow) = answer {
+                self.answer_permission(request_id, allow);
+            }
+            return;
+        }
+        if let Some(request) = self.authentications.front() {
+            let mut answer = None;
+            egui::Modal::new(Id::unique("authentication")).show(ctx, |ui| {
+                ui.heading("Website authentication");
+                ui.label(request.url().origin().ascii_serialization());
+                ui.add(egui::TextEdit::singleline(&mut self.chrome.username).hint_text("Username"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.chrome.password)
+                        .password(true)
+                        .hint_text("Password"),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        answer = Some(false);
+                    }
+                    if ui.button("Sign in").clicked() {
+                        answer = Some(true);
+                    }
+                });
+            });
+            if let Some(allow) = answer {
+                let request = self.authentications.pop_front().unwrap();
+                if allow {
+                    request.authenticate(
+                        std::mem::take(&mut self.chrome.username),
+                        std::mem::take(&mut self.chrome.password),
+                    );
+                }
+                self.chrome.password.clear();
+                self.chrome.username.clear();
+            }
+            return;
+        }
+        let Some((owner, mut control)) = self.controls.pop_front() else {
+            return;
+        };
+        let mut finished = false;
+        let title = self
+            .session()
+            .tabs()
+            .iter()
+            .find(|t| t.view.id() == owner)
+            .map(|t| t.url())
+            .unwrap_or_default();
+        match &mut control {
+            servo::EmbedderControl::SimpleDialog(dialog) => {
+                let mut answer = None;
+                egui::Modal::new(Id::unique("site_dialog")).show(ctx, |ui| {
+                    ui.heading("Message from website");
+                    ui.label(shorten(&title, 80));
+                    ui.separator();
+                    ui.label(dialog.message());
+                    if let servo::SimpleDialog::Prompt(prompt) = dialog {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.chrome.prompt_text)
+                                .hint_text(prompt.current_value()),
+                        );
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            answer = Some(false);
+                        }
+                        if ui.button("OK").clicked() {
+                            answer = Some(true);
+                        }
+                    });
+                });
+                if let Some(allow) = answer {
+                    if let servo::EmbedderControl::SimpleDialog(mut dialog) = control {
+                        if let servo::SimpleDialog::Prompt(prompt) = &mut dialog {
+                            prompt.set_current_value(&std::mem::take(&mut self.chrome.prompt_text));
+                        }
+                        if allow {
+                            dialog.confirm();
+                        } else {
+                            dialog.dismiss();
+                        }
+                    }
+                    return;
+                }
+            }
+            servo::EmbedderControl::SelectElement(select) => {
+                let mut selected = select.selected_options();
+                egui::Modal::new(Id::unique("select_element")).show(ctx, |ui| {
+                    ui.label("Choose an option");
+                    egui::ScrollArea::vertical()
+                        .max_height(350.0)
+                        .show(ui, |ui| {
+                            let mut option = |ui: &mut Ui, item: &servo::SelectElementOption| {
+                                let checked = selected.contains(&item.id);
+                                if ui
+                                    .add_enabled(
+                                        !item.is_disabled,
+                                        egui::Button::new(&item.label).selected(checked),
+                                    )
+                                    .clicked()
+                                {
+                                    if select.allow_select_multiple() {
+                                        if checked {
+                                            selected.retain(|id| *id != item.id);
+                                        } else {
+                                            selected.push(item.id);
+                                        }
+                                    } else {
+                                        selected = vec![item.id];
+                                        finished = true;
+                                    }
+                                }
+                            };
+                            for item in select.options() {
+                                match item {
+                                    servo::SelectElementOptionOrOptgroup::Option(item) => {
+                                        option(ui, item)
+                                    }
+                                    servo::SelectElementOptionOrOptgroup::Optgroup {
+                                        label,
+                                        options,
+                                    } => {
+                                        ui.strong(label);
+                                        for item in options {
+                                            option(ui, item);
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    if ui.button("Done").clicked() {
+                        finished = true;
+                    }
+                });
+                select.select(selected);
+                if finished {
+                    if let servo::EmbedderControl::SelectElement(select) = control {
+                        select.submit();
+                    }
+                    return;
+                }
+            }
+            servo::EmbedderControl::FilePicker(picker) => {
+                let mut answer = None;
+                egui::Modal::new(Id::unique("file_picker")).show(ctx, |ui| {
+                    ui.heading("Choose file for website");
+                    ui.label(shorten(&title, 80));
+                    ui.label(if picker.allow_select_multiple() {
+                        "Enter absolute paths, one per line"
+                    } else {
+                        "Enter an absolute file path"
+                    });
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.chrome.file_paths)
+                            .desired_width(420.0)
+                            .desired_rows(3),
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Cancel").clicked() {
+                            answer = Some(false);
+                        }
+                        if ui.button("Choose").clicked() {
+                            answer = Some(true);
+                        }
+                    });
+                });
+                if let Some(allow) = answer {
+                    if let servo::EmbedderControl::FilePicker(mut picker) = control {
+                        let paths: Vec<std::path::PathBuf> = self
+                            .chrome
+                            .file_paths
+                            .lines()
+                            .filter(|s| !s.trim().is_empty())
+                            .map(|s| s.trim().into())
+                            .collect();
+                        if allow
+                            && !paths.is_empty()
+                            && paths.iter().all(|p| p.is_absolute() && p.is_file())
+                            && (picker.allow_select_multiple() || paths.len() == 1)
+                        {
+                            picker.select(&paths);
+                            picker.submit();
+                        } else {
+                            picker.dismiss();
+                        }
+                    }
+                    self.chrome.file_paths.clear();
+                    return;
+                }
+            }
+            servo::EmbedderControl::ColorPicker(picker) => {
+                let color = picker.current_color();
+                let mut rgb = color.map(|c| [c.red, c.green, c.blue]).unwrap_or([0, 0, 0]);
+                egui::Modal::new(Id::unique("color_picker")).show(ctx, |ui| {
+                    ui.heading("Choose a color");
+                    ui.color_edit_button_srgb(&mut rgb);
+                    if ui.button("Done").clicked() {
+                        finished = true;
+                    }
+                });
+                picker.select(Some(servo::RgbColor {
+                    red: rgb[0],
+                    green: rgb[1],
+                    blue: rgb[2],
+                }));
+                if finished {
+                    if let servo::EmbedderControl::ColorPicker(picker) = control {
+                        picker.submit();
+                    }
+                    return;
+                }
+            }
+            servo::EmbedderControl::ContextMenu(menu) => {
+                let mut action = None;
+                let mut download = None;
+                egui::Modal::new(Id::unique("page_context")).show(ctx, |ui| {
+                    if let Some(url) = &menu.element_info().link_url
+                        && ui.button("Download link…").clicked()
+                    {
+                        download = Some(url.to_string());
+                        finished = true;
+                    }
+                    if let Some(url) = &menu.element_info().image_url
+                        && ui.button("Download image…").clicked()
+                    {
+                        download = Some(url.to_string());
+                        finished = true;
+                    }
+                    for item in menu.items() {
+                        match item {
+                            servo::ContextMenuItem::Item {
+                                label,
+                                action: item_action,
+                                enabled,
+                            } => {
+                                if ui.add_enabled(*enabled, egui::Button::new(label)).clicked() {
+                                    action = Some(*item_action);
+                                }
+                            }
+                            servo::ContextMenuItem::Separator => {
+                                ui.separator();
+                            }
+                        }
+                    }
+                    if ui.button("Dismiss").clicked() {
+                        finished = true;
+                    }
+                });
+                if let Some(url) = download {
+                    self.offer_download(&url, "");
+                }
+                if action.is_some() || finished {
+                    if let servo::EmbedderControl::ContextMenu(menu) = control {
+                        if let Some(action) = action {
+                            menu.select(action);
+                        } else {
+                            menu.dismiss();
+                        }
+                    }
+                    return;
+                }
+            }
+            servo::EmbedderControl::InputMethod(_) => return,
+        }
+        self.controls.push_front((owner, control));
+    }
+}

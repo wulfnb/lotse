@@ -1,0 +1,5 @@
+# Tested portable authentication/coverage environment; Docker runtime uses Debian packages.
+cryptography==46.0.7
+coverage==7.16.2
+cffi==2.1.1
+pycparser==3.11

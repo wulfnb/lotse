@@ -1,0 +1,153 @@
+//! Startup validation runs before any profile or engine side effects.
+use std::path::PathBuf;
+#[derive(Debug, Default)]
+pub struct Options {
+    pub help: bool,
+    pub profile_dir: Option<PathBuf>,
+    pub url: Option<String>,
+    pub smoke_test: bool,
+    pub download_test: bool,
+    pub toolbox_test: bool,
+    pub theme_test: bool,
+    pub capabilities_test: bool,
+    pub capture: Option<PathBuf>,
+    pub remote_devtools: Option<u16>,
+    pub webdriver_port: Option<u16>,
+    pub multiprocess: bool,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BuildFeatures {
+    pub multiprocess: bool,
+    pub test_harness: bool,
+}
+
+impl Options {
+    pub fn test_mode(&self) -> bool {
+        self.smoke_test
+            || self.download_test
+            || self.toolbox_test
+            || self.theme_test
+            || self.capabilities_test
+    }
+
+    pub fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        Self::parse_with(
+            args,
+            BuildFeatures {
+                multiprocess: cfg!(feature = "multiprocess"),
+                test_harness: cfg!(feature = "test-harness"),
+            },
+        )
+    }
+
+    pub(crate) fn parse_with(
+        args: impl IntoIterator<Item = String>,
+        features: BuildFeatures,
+    ) -> Result<Self, String> {
+        Self::parse_tokens(args.into_iter().collect(), features)
+    }
+
+    // Keep the parser concrete: callers can supply any iterator without creating
+    // a separate copy of the validation state machine for every iterator type.
+    fn parse_tokens(args: Vec<String>, features: BuildFeatures) -> Result<Self, String> {
+        let mut result = Self::default();
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "--profile-dir" => {
+                    result.profile_dir =
+                        Some(args.next().ok_or("--profile-dir requires a path")?.into())
+                }
+                "--multiprocess" => {
+                    if !features.multiprocess {
+                        return Err("Rebuild with --features multiprocess first".into());
+                    }
+                    result.multiprocess = true;
+                }
+                "--webdriver-port" => {
+                    result.webdriver_port = Some(
+                        args.next()
+                            .ok_or("--webdriver-port requires a port")?
+                            .parse()
+                            .map_err(|_| "Invalid WebDriver port")?,
+                    );
+                }
+                "--remote-devtools" => {
+                    result.remote_devtools = Some(
+                        args.next()
+                            .ok_or("--remote-devtools requires a loopback port")?
+                            .parse()
+                            .map_err(|_| "Invalid DevTools port")?,
+                    );
+                }
+                "--smoke-test" => result.smoke_test = true,
+                "--download-test" => result.download_test = true,
+                "--toolbox-test" => result.toolbox_test = true,
+                "--capabilities-test" => result.capabilities_test = true,
+                "--theme-test" => result.theme_test = true,
+                "--capture" => {
+                    result.capture =
+                        Some(args.next().ok_or("--capture requires a PNG path")?.into())
+                }
+                "--help" | "-h" => {
+                    result.help = true;
+                }
+                "--" => {
+                    for remainder in args {
+                        if result.url.is_none() {
+                            result.url = Some(remainder);
+                        } else {
+                            return Err("Only one startup URL is accepted".into());
+                        }
+                    }
+                    break;
+                }
+                _ if arg.starts_with('-') => return Err(format!("Unknown option: {arg}")),
+                _ if result.url.is_none() => result.url = Some(arg),
+                _ => return Err("Only one startup URL is accepted".into()),
+            }
+        }
+        if result
+            .profile_dir
+            .as_ref()
+            .is_some_and(|path| path.as_os_str().is_empty())
+        {
+            return Err("--profile-dir requires a nonempty path".into());
+        }
+        if result.help {
+            return Ok(result);
+        }
+        if (result.smoke_test
+            || result.download_test
+            || result.toolbox_test
+            || result.theme_test
+            || result.capabilities_test)
+            && result.profile_dir.is_none()
+        {
+            return Err("Integration tests require an isolated --profile-dir".into());
+        }
+        if result.test_mode() && !features.test_harness {
+            return Err("Native test modes require --features test-harness".into());
+        }
+        if [
+            result.smoke_test,
+            result.download_test,
+            result.toolbox_test,
+            result.theme_test,
+            result.capabilities_test,
+        ]
+        .into_iter()
+        .filter(|enabled| *enabled)
+        .count()
+            > 1
+        {
+            return Err("Choose only one native test mode".into());
+        }
+        Ok(result)
+    }
+}
+
+#[cfg(test)]
+#[path = "options_tests.rs"]
+mod tests;

@@ -1,0 +1,93 @@
+"""Real W3C HTTP smoke test against an isolated, short-lived native browser process."""
+import base64
+import json
+import os
+from pathlib import Path
+import subprocess
+import socket
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+
+binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/servo-browser').resolve())
+profile = Path(tempfile.mkdtemp(prefix='servo-webdriver-', dir=os.environ.get('LOTSE_TEST_OUTPUT')))
+with socket.socket() as listener:
+    listener.bind(('127.0.0.1', 0))
+    port = listener.getsockname()[1]
+base = f'http://127.0.0.1:{port}'
+
+def request(method, path, body=None, expected=200):
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(base + path, data=data, method=method, headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=36) as response:
+            status, raw = response.status, response.read()
+    except urllib.error.HTTPError as error:
+        status, raw = error.code, error.read()
+    result = json.loads(raw)
+    assert status == expected, (method, path, status, result)
+    return result['value']
+
+with (profile / 'browser.log').open('w') as log:
+    process = subprocess.Popen([binary, '--profile-dir', str(profile), '--webdriver-port', str(port), 'servo://newtab'], stdout=log, stderr=log)
+    try:
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                assert request('GET', '/status')['ready']
+                break
+            except (OSError, AssertionError):
+                if time.monotonic() > deadline or process.poll() is not None:
+                    raise RuntimeError((profile / 'browser.log').read_text())
+                time.sleep(0.2)
+        assert request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'firefox'}}}, 500)['error'] == 'session not created'
+        session = request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'lotse'}}})
+        assert session['capabilities']['browserName'] == 'lotse'
+        assert session['capabilities']['browserVersion'].startswith('0.1.0')
+        sid = session['sessionId']
+        root = f'/session/{sid}'
+        assert request('POST', root + '/url', {'url': 'javascript://blocked'}, 400)['error'] == 'invalid argument'
+        request('POST', root + '/url', {'url': 'servo://newtab'})
+        assert request('GET', root + '/url') == 'lotse://newtab'
+        request('POST', root + '/url', {'url': os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767') + '/capabilities.html'})
+        title = request('GET', root + '/title')
+        assert title == 'Capability fixture', title
+        assert request('GET', root + '/url').endswith('/capabilities.html')
+        assert 'needle' in request('GET', root + '/source')
+        result = request('POST', root + '/execute/sync', {'script': 'return {sum:arguments[0]+arguments[1], title:document.title};', 'args': [20, 22]})
+        assert result == {'sum': 42, 'title': 'Capability fixture'}, result
+        assert request('GET', root + '/window') in request('GET', root + '/window/handles')
+        fixture = os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767')
+        request('POST', root + '/url', {'url': fixture + '/second.html'})
+        title = request('GET', root + '/title')
+        assert title == 'Second Servo document', title
+        print('WebDriver: back', flush=True)
+        request('POST', root + '/back', {})
+        title = request('GET', root + '/title')
+        assert title == 'Capability fixture', title
+        print('WebDriver: forward', flush=True)
+        request('POST', root + '/forward', {})
+        title = request('GET', root + '/title')
+        assert title == 'Second Servo document', title
+        print('WebDriver: refresh', flush=True)
+        request('POST', root + '/refresh', {})
+        title = request('GET', root + '/title')
+        assert title == 'Second Servo document', title
+        print('WebDriver: forward', flush=True)
+        request('POST', root + '/forward', {})  # End-of-history is a successful no-op.
+        assert request('GET', root + '/url').endswith('/second.html')
+        png = base64.b64decode(request('GET', root + '/screenshot'))
+        assert png.startswith(b'\x89PNG\r\n\x1a\n')
+        (profile / 'webdriver-screenshot.png').write_bytes(png)
+        assert request('POST', root + '/element', {'using': 'css selector', 'value': 'h1'}, 500)['error'] == 'unsupported operation'
+        request('DELETE', root)
+        print(f'WEBDRIVER TEST PASSED: W3C HTTP sessions, capability rejection, engine navigation/back/forward/refresh, URL/title/source, JSON script arguments/results, window handles, viewport PNG, unsupported-command error and session deletion. Artifacts: {profile}', flush=True)
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()

@@ -1,0 +1,11 @@
+.git
+.agents
+.codex
+target
+downloads
+**/__pycache__
+**/*.pyc
+.env
+.env.*
+!.env.docker.example
+.DS_Store

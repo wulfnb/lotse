@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Code Quality & Lints
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lotse-ci-lint"
+      - name: Formatting check
+        run: cargo fmt --check
+      - name: Core lints
+        run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '26'
+      - name: JavaScript line coverage (100% required)
+        run: sh scripts/javascript-coverage.sh
+
+  core-matrix:
+    name: Core Suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lotse-core-${{ matrix.os }}"
+      - name: Core unit tests
+        run: cargo test --locked --no-default-features --lib
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        if: runner.os != 'Windows'
+        with:
+          python-version: '3.12'
+      - name: Install Python dev dependencies
+        if: runner.os != 'Windows'
+        run: python -m pip install -r requirements-dev.txt
+      - name: Gateway and tooling unit tests
+        if: runner.os != 'Windows'
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Install coverage tool
+        if: runner.os == 'Linux'
+        run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - name: Core coverage and regression gate
+        if: runner.os == 'Linux'
+        run: sh scripts/coverage.sh
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always() && runner.os == 'Linux'
+        with:
+          name: core-coverage-linux
+          path: target/coverage/
+          include-hidden-files: true
+
+  desktop-macos:
+    name: Desktop Native & Engine Suite (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: 4
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lotse-desktop-macos"
+      - name: Native system dependencies
+        run: brew install pkgconf gstreamer libnice-gstreamer
+      - name: Production lints
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Harness lints
+        run: cargo clippy --locked --all-targets --features test-harness -- -D warnings
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '26'
+      - name: JavaScript line coverage
+        run: sh scripts/javascript-coverage.sh
+      - name: Gateway and release-tool tests with coverage
+        run: |
+          python -m coverage run -m unittest discover -s tests -p 'test_*.py' -v
+          python -m coverage html
+          python -m coverage xml
+          python -m coverage json
+      - name: Instrumented unit and real engine coverage
+        run: python scripts/desktop-coverage.py
+      - name: Native integration suite verification
+        run: python scripts/native-tests.py --suite all
+      - name: Whole-project completeness gate
+        run: python scripts/coverage-inventory.py --require-complete
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: desktop-coverage-macos
+          path: |
+            target/coverage/
+            !target/coverage/desktop/objects/
+
+  docker-integration:
+    name: Docker & Web Gateway Integration (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMPOSE_FILE: compose.quality.yaml
+      COMPOSE_PROJECT_NAME: lotse-ci-docker
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Generate disposable test credentials
+        run: echo "LOTSE_TEST_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - name: Build test container image
+        run: docker compose build
+      - name: Launch test environment
+        run: docker compose up -d --wait --wait-timeout 180
+      - name: Test authentication gateway & WebSocket revocation
+        run: sh scripts/docker-account-test.sh
+      - name: Test headless browser smoke & rendering
+        run: sh scripts/docker-smoke.sh
+      - name: Test developer tools & toolbox
+        run: sh scripts/docker-toolbox-test.sh
+      - name: Test streaming download pipeline
+        run: sh scripts/docker-download-test.sh
+      - name: Collect container logs on failure
+        if: always()
+        run: docker compose logs --no-color > docker-ci.log
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: docker-ci-logs
+          path: docker-ci.log
+      - name: Clean up test containers
+        if: always()
+        run: docker compose down -v
+
+  ci-gate:
+    name: CI Completion Gate
+    needs: [lint, core-matrix, desktop-macos, docker-integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all checks passed
+        run: echo "All parallel CI checks and integration test suites succeeded."
+

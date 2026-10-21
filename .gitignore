@@ -1,0 +1,11 @@
+/target
+
+__pycache__/
+*.pyc
+
+.env
+/downloads/
+
+.venv/
+.DS_Store
+/docker-quality.log

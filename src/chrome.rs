@@ -1,0 +1,58 @@
+//! Ephemeral chrome/input state. It is never persisted or shared with the core model.
+use egui::Rect;
+use winit::{
+    dpi::PhysicalPosition,
+    event::{Modifiers, MouseButton},
+};
+pub(crate) struct Chrome {
+    pub address: String,
+    pub last_url: String,
+    pub focus_address: bool,
+    pub page_focused: bool,
+    pub page_rect: Rect,
+    pub tab_rects: Vec<(servo::WebViewId, Rect)>,
+    pub reload_rect: Rect,
+    pub modifiers: Modifiers,
+    pub pointer: PhysicalPosition<f64>,
+    pub pressed_buttons: Vec<MouseButton>,
+    pub show_console: bool,
+    pub show_history: bool,
+    pub show_bookmarks: bool,
+    pub library_query: String,
+    pub confirm_clear_history: bool,
+    pub library_rect: Rect,
+    pub username: String,
+    pub password: String,
+    pub file_paths: String,
+    pub prompt_text: String,
+    pub closed_tabs: Vec<String>,
+    pub ime_composing: bool,
+}
+impl Default for Chrome {
+    fn default() -> Self {
+        Self {
+            address: String::new(),
+            last_url: String::new(),
+            focus_address: false,
+            page_focused: false,
+            page_rect: Rect::NOTHING,
+            tab_rects: Vec::new(),
+            reload_rect: Rect::NOTHING,
+            modifiers: Modifiers::default(),
+            pointer: PhysicalPosition::new(-1.0, -1.0),
+            pressed_buttons: Vec::new(),
+            show_console: false,
+            show_history: false,
+            show_bookmarks: false,
+            library_query: String::new(),
+            confirm_clear_history: false,
+            library_rect: Rect::NOTHING,
+            username: String::new(),
+            password: String::new(),
+            file_paths: String::new(),
+            prompt_text: String::new(),
+            closed_tabs: Vec::new(),
+            ime_composing: false,
+        }
+    }
+}

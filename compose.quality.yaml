@@ -1,0 +1,15 @@
+# Dedicated test environment. Never mounts the normal Lotse profile/downloads.
+services:
+  servo-browser:
+    image: lotse-quality:local
+    build:
+      context: .
+      args:
+        BUILD_FEATURES: test-harness
+        RUST_IMAGE: rust:1.98.0-slim-trixie
+    environment:
+      BROWSER_USER: quality
+      BROWSER_PASSWORD: ${LOTSE_TEST_PASSWORD:?Set a disposable test password}
+    tmpfs:
+      - /config:uid=1000,gid=1000,mode=0700
+    shm_size: 512mb
