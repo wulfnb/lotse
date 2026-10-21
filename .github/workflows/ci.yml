@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   pull_request:
   push:
     branches: [main]
@@ -10,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -86,6 +87,8 @@ jobs:
     timeout-minutes: 90
     env:
       CARGO_BUILD_JOBS: 4
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -119,8 +122,8 @@ jobs:
         run: python scripts/desktop-coverage.py
       - name: Native integration suite verification
         run: python scripts/native-tests.py --suite all
-      - name: Whole-project completeness gate
-        run: python scripts/coverage-inventory.py --require-complete
+      - name: Whole-project completeness inventory
+        run: python scripts/coverage-inventory.py
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:

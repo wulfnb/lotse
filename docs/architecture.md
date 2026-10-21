@@ -129,8 +129,9 @@ add migration tests before changing a stored representation. Test failure paths
 for external operations, not just successful UI flows. Run the relevant native
 suite after rendering, input, engine or platform changes.
 
-No commit or push is part of this implementation. The initial source baseline
-and these changes remain in the working tree for the planned evening commit.
+This agent performed no staging, commit or push. The shared checkout gained an
+initial commit during verification; its history was left untouched. Subsequent
+workflow and documentation edits remain in the working tree.
 
 ## Decision record and verification
 

@@ -17,7 +17,7 @@ requires separate compilation or distribution, as proposed in the initial review
 | Keep native tests out of production | Explicit test-harness feature and explicit isolated profile requirement | Parser contracts and native runner |
 | Separate portable auth tests from Docker | Real handler tests use temporary credentials and substituted process boundaries; isolated Compose environment tests actual gateway/WebSocket behavior | Python contracts and Docker integration workflow |
 | Automate quality and produce reports | Pinned tooling, CI workflows, native runner, Rust/Python/JavaScript exports, source inventory and exact 100% line gates | Gate tests reject rounding, missing files/platforms and invalid captures |
-| Establish Git baseline | Pending the user's planned single evening commit | No staging, commit or push performed |
+| Establish Git baseline | Initial commit c0849c1 appeared in the shared checkout during verification | This agent did not stage, commit or push; history left untouched |
 
 The interfaces are intentionally specific. Rendering, AppKit objects, Servo
 JavaScript/developer-tools requests and OS clipboard calls remain desktop adapter

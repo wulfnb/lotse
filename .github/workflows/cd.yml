@@ -20,12 +20,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ci-validation:
+    name: Require CI before release packaging
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build-macos:
+    needs: ci-validation
     name: Package macOS Bundle (ARM64)
     runs-on: macos-latest
     timeout-minutes: 90
     env:
       CARGO_BUILD_JOBS: 4
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install pinned toolchain
@@ -50,6 +59,7 @@ jobs:
           path: dist/*
 
   build-linux-and-docker:
+    needs: ci-validation
     name: Build Linux Package & Docker (GHCR)
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -71,6 +81,9 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          provenance: false
+          build-args: |
+            BUILD_JOBS=4
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:test
@@ -91,6 +104,7 @@ jobs:
           path: dist/Lotse-Linux-x86_64.tar.gz
 
   build-windows:
+    needs: ci-validation
     name: Package Windows (x64)
     runs-on: windows-latest
     timeout-minutes: 30
@@ -102,14 +116,15 @@ jobs:
         with:
           shared-key: "lotse-cd-windows"
       - name: Build Windows release executable
-        run: cargo build --release --locked --no-default-features
+        run: cargo build --release --locked --no-default-features --features desktop,brotli-streams
       - name: Package Windows ZIP archive
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist\lotse-windows-x64
-          if (Test-Path "target\release\servo-browser.exe") {
-            Copy-Item "target\release\servo-browser.exe" -Destination "dist\lotse-windows-x64\"
+          if (!(Test-Path "target\release\servo-browser.exe")) {
+            throw "Windows browser executable is missing; refusing an incomplete release"
           }
+          Copy-Item "target\release\servo-browser.exe" -Destination "dist\lotse-windows-x64\"
           if (Test-Path "LICENSE") {
             Copy-Item "LICENSE" -Destination "dist\lotse-windows-x64\"
           }
@@ -134,25 +149,31 @@ jobs:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: '*-dist'
           path: release-artifacts
           merge-multiple: true
       - name: Prepare distribution directory & checksums
         run: |
           mkdir -p release-files
-          cp release-artifacts/* release-files/ || true
+          cp release-artifacts/* release-files/
           cd release-files
-          sha256sum * > SHA256SUMS.txt
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt ./SHA256SUMS.txt
           cat SHA256SUMS.txt
       - name: Determine Release Tag
         id: tag
+        env:
+          RELEASE_INPUT: ${{ github.event.inputs.release_tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_tag }}" ]; then
-            echo "RELEASE_TAG=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            echo "RELEASE_TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ -n "$RELEASE_INPUT" ]; then
+            release_tag="$RELEASE_INPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            release_tag="${GITHUB_REF#refs/tags/}"
           else
-            echo "RELEASE_TAG=test-preview" >> "$GITHUB_OUTPUT"
+            release_tag=test-preview
           fi
+          git check-ref-format "refs/tags/$release_tag"
+          printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
       - name: Create or Update GitHub Pre-Release
         uses: softprops/action-gh-release@v2
         with:
@@ -185,8 +206,8 @@ jobs:
             docker run -d \
               --name lotse-browser \
               -p 7443:7443 \
-              -e SERVO_WEB_USER=servo \
-              -e SERVO_WEB_PASSWORD='your-strong-password' \
+              -e BROWSER_USER=servo \
+              -e BROWSER_PASSWORD='your-strong-password' \
               -v lotse-profile:/config \
               ${{ env.IMAGE_NAME }}:latest
             ```
@@ -195,5 +216,5 @@ jobs:
 
             ### Integrity & Checksums
 
-            All release assets are signed and verified in `SHA256SUMS.txt`.
+            SHA256 checksums are provided in `SHA256SUMS.txt`.
 

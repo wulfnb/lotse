@@ -6,6 +6,7 @@ services:
       context: .
       args:
         BUILD_FEATURES: test-harness
+        BUILD_JOBS: 4
         RUST_IMAGE: rust:1.98.0-slim-trixie
     environment:
       BROWSER_USER: quality
