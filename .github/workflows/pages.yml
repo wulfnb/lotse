@@ -27,6 +27,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Upload static website artifact
         uses: actions/upload-pages-artifact@v3
         with:
