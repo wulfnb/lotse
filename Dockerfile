@@ -23,7 +23,7 @@ COPY vendor ./vendor
 COPY src ./src
 COPY assets/icons/browser-icon-256.png ./assets/icons/browser-icon-256.png
 ARG BUILD_PROFILE=release
-ARG BUILD_JOBS=2
+ARG BUILD_JOBS=4
 ARG BUILD_FEATURES=desktop
 RUN --mount=type=cache,id=servo-registry-${TARGETARCH},target=/usr/local/cargo/registry \
     --mount=type=cache,id=servo-git-${TARGETARCH},target=/usr/local/cargo/git \
