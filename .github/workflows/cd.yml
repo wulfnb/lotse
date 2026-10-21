@@ -79,6 +79,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          provenance: false
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:test
@@ -144,6 +145,7 @@ jobs:
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: '*-dist'
           path: release-artifacts
           merge-multiple: true
       - name: Prepare distribution directory & checksums
