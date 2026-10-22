@@ -9,6 +9,8 @@ class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(Path(__file__).parent / 'fixtures'), **kwargs)
     def end_headers(self):
+        if self.path.split('?', 1)[0] == '/interaction.html':
+            self.send_header('Cache-Control', 'no-store')
         if self.path.split('?', 1)[0] == '/toolbox.html':
             self.send_header('Set-Cookie', 'lotse_visible=visible-fixture; Path=/; SameSite=Lax')
             self.send_header('Set-Cookie', 'lotse_http_only=native-only-fixture; Path=/; HttpOnly; SameSite=Strict')
@@ -23,6 +25,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     def do_GET(self):
+        if self.path.split('?', 1)[0] == '/interaction.html':
+            visits = getattr(self.server, 'interaction_visits', 0)
+            self.server.interaction_visits = visits + 1
+            if visits:
+                time.sleep(getattr(self.server, 'smoke_reload_delay', 0))
         if self.path.startswith('/api/data'):
             time.sleep(0.12)
             self.send_json(200, {'message': 'real network response', 'items': [1, 2, 3]})

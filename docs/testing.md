@@ -64,6 +64,14 @@ JSON and LCOV remain standalone review artifacts. Darwin continuous profiles ret
 counters from terminated browser processes; see the [Rust instrumentation docs](https://doc.rust-lang.org/rustc/instrument-coverage.html)
 and [LLVM continuous coverage documentation](https://clang.llvm.org/docs/SourceBasedCodeCoverage.html).
 
+The smoke suite clicks the real Refresh toolbar button and waits for a new,
+fully loaded document before checking that the counter and input reset. Its HTTP
+fixture disables caching and delays subsequent interaction-page responses by
+1.2 seconds, exercising reloads beyond the former fixed 650 ms wait. The overall
+90-second smoke deadline still fails a missed click or a reload that never finishes.
+When a suite fails, coverage export retains the failed measurement status and
+prints the failed suite and native log directory after the coverage table.
+
 For optional, informational Rust core branch measurement:
 
 ```sh

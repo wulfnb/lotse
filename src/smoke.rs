@@ -148,7 +148,7 @@ impl Browser {
                 self.window.request_redraw();
             }
             2 if smoke.stage_at.elapsed() > Duration::from_millis(600) => {
-                self.smoke_evaluate("JSON.stringify({button:document.querySelector('#counter').textContent, input:document.querySelector('#input').value, scrolled:window.scrollY>0, gradientColor:getComputedStyle(document.querySelector('#gradient-probe')).color, brandColor:getComputedStyle(document.querySelector('#brand-gradient')).color, gradientBackground:getComputedStyle(document.querySelector('#gradient-probe')).backgroundImage, normalBackground:getComputedStyle(document.querySelector('#normal-gradient')).backgroundImage})", 3);
+                self.smoke_evaluate("window.__lotseSmokeOldDocument = true; JSON.stringify({button:document.querySelector('#counter').textContent, input:document.querySelector('#input').value, scrolled:window.scrollY>0, gradientColor:getComputedStyle(document.querySelector('#gradient-probe')).color, brandColor:getComputedStyle(document.querySelector('#brand-gradient')).color, gradientBackground:getComputedStyle(document.querySelector('#gradient-probe')).backgroundImage, normalBackground:getComputedStyle(document.querySelector('#normal-gradient')).backgroundImage})", 3);
             }
             3 => {
                 let Some(text) = self.smoke_result() else {
@@ -205,14 +205,24 @@ impl Browser {
                 }
                 self.smoke_stage(11);
             }
-            11 if complete && smoke.stage_at.elapsed() > Duration::from_millis(650) => {
-                self.smoke_evaluate("JSON.stringify({count:window.count,input:document.querySelector('#input').value})",12);
+            // Complete can still describe the previous document while native input
+            // and navigation callbacks are queued. Wait for document replacement,
+            // rather than assuming a fixed delay means the reload has finished.
+            11 if complete && smoke.stage_at.elapsed() > Duration::from_millis(50) => {
+                self.smoke_evaluate("JSON.stringify({oldDocument:window.__lotseSmokeOldDocument===true,ready:document.readyState,count:window.count,input:document.querySelector('#input')?.value})",12);
             }
             12 => {
                 let Some(text) = self.smoke_result() else {
                     return;
                 };
                 let data: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if data["oldDocument"] == true || data["ready"] != "complete" {
+                    // Poll only; a missed toolbar click must still fail the
+                    // suite's overall 90-second deadline, never be retried.
+                    self.smoke_stage(11);
+                    self.window.request_redraw();
+                    return;
+                }
                 assert_eq!(
                     data["count"], 0,
                     "The refresh toolbar button must reload the document"

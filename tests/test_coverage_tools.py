@@ -21,6 +21,22 @@ def load(name):
 
 check = load('check-coverage')
 accounting = load('coverage-inventory')
+desktop = load('desktop-coverage')
+
+class DesktopVerificationTests(unittest.TestCase):
+    def test_failed_native_suite_remains_a_failure_after_coverage_export(self):
+        measurement = {'tests_passed': False, 'failures': ['native smoke (exit 101)', 'native logs: /test/run']}
+        with contextlib.redirect_stderr(io.StringIO()) as diagnostic:
+            self.assertEqual(desktop.verification_status(measurement), 1)
+        self.assertIn('native smoke (exit 101)', diagnostic.getvalue())
+        self.assertIn('/test/run', diagnostic.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()) as diagnostic:
+            self.assertEqual(desktop.verification_status({'tests_passed': False}), 1)
+        self.assertIn('inspect test and native logs', diagnostic.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()) as diagnostic:
+            self.assertEqual(desktop.verification_status({'tests_passed': True}), 0)
+        self.assertEqual(diagnostic.getvalue(), '')
+
 
 class CoverageGateTests(unittest.TestCase):
     def reports(self, covered=10, count=10):

@@ -38,6 +38,9 @@ def main():
             continue
         module = load(f'lotse_{suite}_fixture', root / 'tests' / ('download_server.py' if suite == 'download' else 'network_server.py'))
         server = ThreadingHTTPServer(('127.0.0.1', 0), module.Handler)
+        # Exercise reloads slower than the smoke driver's former 650ms wait.
+        if suite == 'smoke':
+            server.smoke_reload_delay = 1.2
         threading.Thread(target=server.serve_forever, daemon=True).start()
         fixture = {'smoke': 'interaction.html', 'theme': 'interaction.html', 'capabilities': 'capabilities.html', 'toolbox': 'toolbox.html', 'download': '', 'webdriver': '', 'media': ''}[suite]
         # Keep artifacts, use a new profile on every invocation, never the user's profile.
