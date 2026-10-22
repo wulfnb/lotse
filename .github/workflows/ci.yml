@@ -59,7 +59,6 @@ jobs:
       - name: Core unit tests
         run: cargo test --locked --no-default-features --lib
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        if: runner.os != 'Windows'
         with:
           python-version: '3.12'
       - name: Install Python dev dependencies
@@ -74,10 +73,13 @@ jobs:
       - name: Core coverage and regression gate
         if: runner.os == 'Linux'
         run: sh scripts/coverage.sh
+      - name: Core platform line measurement
+        if: runner.os != 'Linux'
+        run: python scripts/desktop-coverage.py --core-only --output target/coverage/builds/${{ runner.os }}-core
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        if: always() && runner.os == 'Linux'
+        if: always()
         with:
-          name: core-coverage-linux
+          name: core-coverage-${{ runner.os }}
           path: target/coverage/
           include-hidden-files: true
 
@@ -151,12 +153,25 @@ jobs:
         run: docker compose up -d --wait --wait-timeout 180
       - name: Test authentication gateway & WebSocket revocation
         run: sh scripts/docker-account-test.sh
+      - name: Test viewer uploads and nginx security boundaries
+        run: python3 scripts/docker-ux-test.py "$(docker compose images -q servo-browser)"
       - name: Test headless browser smoke & rendering
         run: sh scripts/docker-smoke.sh
       - name: Test developer tools & toolbox
         run: sh scripts/docker-toolbox-test.sh
       - name: Test streaming download pipeline
         run: sh scripts/docker-download-test.sh
+      - name: Shell adapter contracts and coverage
+        run: |
+          docker tag "$(docker compose images -q servo-browser)" lotse-shell-base:ci
+          docker build --build-arg LOTSE_BASE=lotse-shell-base:ci -f docker/coverage.Dockerfile -t lotse-coverage-tools:ci .
+          mkdir -p target/coverage/shell
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/target/coverage/shell:/output" lotse-coverage-tools:ci /usr/bin/python3 /source/tests/shell_contracts.py --source /source --output /output
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: shell-coverage-linux
+          path: target/coverage/shell/
       - name: Collect container logs on failure
         if: always()
         run: docker compose logs --no-color > docker-ci.log

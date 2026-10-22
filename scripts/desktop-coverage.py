@@ -55,12 +55,14 @@ def main(argv=None):
     raw.mkdir(exist_ok=True)
     branch = os.environ.get('LOTSE_COVERAGE_BRANCH') == '1'
     env = os.environ.copy()
-    env.update(RUSTC_WORKSPACE_WRAPPER=str(ROOT / 'scripts/coverage-rustc.sh'), LLVM_PROFILE_FILE=str(raw / ('%m-%p%c.profraw' if sys.platform == 'darwin' else '%m-%p.profraw')))
+    wrapper = output / ('rustc-wrapper.exe' if os.name == 'nt' else 'rustc-wrapper')
+    env.update(RUSTC_WORKSPACE_WRAPPER=str(wrapper), LLVM_PROFILE_FILE=str(raw / ('%m-%p%c.profraw' if sys.platform == 'darwin' else '%m-%p.profraw')))
     status = 0
     failures = []
     source_fingerprint = fingerprint(ROOT)
     manifest = output / 'measurement.json'
     if not args.report_only:
+        subprocess.run(['rustc', str(ROOT / 'scripts/coverage-rustc.rs'), '--edition=2024', '-o', str(wrapper)], check=True)
         for path in raw.glob('*.profraw'):
             path.unlink()
         cargo_args = ['--locked', '-j', args.jobs, '--message-format=json']
@@ -117,14 +119,17 @@ def main(argv=None):
     sysroot = Path(subprocess.check_output(['rustc', '--print', 'sysroot'], text=True).strip())
     host = next(line.split(': ', 1)[1] for line in subprocess.check_output(['rustc', '-vV'], text=True).splitlines() if line.startswith('host:'))
     llvm = sysroot / 'lib/rustlib' / host / 'bin'
+    suffix = '.exe' if os.name == 'nt' else ''
+    profdata_tool = llvm / ('llvm-profdata' + suffix)
+    coverage_tool = llvm / ('llvm-cov' + suffix)
     merged = output / 'coverage.profdata'
-    subprocess.run([str(llvm / 'llvm-profdata'), 'merge', '-sparse', *map(str, profiles), '-o', str(merged)], check=True)
+    subprocess.run([str(profdata_tool), 'merge', '-sparse', *map(str, profiles), '-o', str(merged)], check=True)
     ignore = r'(/vendor/|/tests/|_tests\.rs$|/src/(' + '|'.join(re.escape(name) for name in HARNESS) + r')$)'
     common = [objects[0], *[arg for obj in objects[1:] for arg in ['--object', obj]], '--instr-profile', str(merged), '--ignore-filename-regex', ignore]
     for kind, arguments, destination in [('export', [], 'coverage.json'), ('export', ['--format=lcov'], 'lcov.info'), ('report', [], 'summary.txt')]:
         with (output / destination).open('w') as stream:
-            subprocess.run([str(llvm / 'llvm-cov'), kind, *common, *arguments], check=True, stdout=stream)
-    subprocess.run([str(llvm / 'llvm-cov'), 'show', *common, '--format=html', '--output-dir', str(output / 'html')], check=True, stdout=subprocess.DEVNULL)
+            subprocess.run([str(coverage_tool), kind, *common, *arguments], check=True, stdout=stream)
+    subprocess.run([str(coverage_tool), 'show', *common, '--format=html', '--output-dir', str(output / 'html')], check=True, stdout=subprocess.DEVNULL)
     print((output / 'summary.txt').read_text(), flush=True)
     return verification_status(measurement) or int(bool(status))
 

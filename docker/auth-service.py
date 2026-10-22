@@ -16,6 +16,7 @@ import sys
 import threading
 import tempfile
 import time
+from urllib.parse import unquote
 from cryptography.fernet import Fernet
 
 DIRECTORY = Path(os.environ.get('BROWSER_AUTH_DIR', '/config/auth'))
@@ -178,6 +179,31 @@ def watch_websocket():
                 restart_websocket()
 
 
+UPLOAD_LIMIT = 32 * 1024 * 1024
+UPLOAD_QUOTA = 256 * 1024 * 1024
+
+
+def save_upload(encoded_name, body):
+    name = unquote(encoded_name, errors='strict')
+    if not name or len(name.encode()) > 200 or name in ('.', '..') or any(c in name for c in '/\\:') or any(ord(c) < 32 for c in name):
+        raise ValueError('Choose a file with a valid filename (no paths).')
+    if len(body) > UPLOAD_LIMIT:
+        raise ValueError('Files must be 32 MiB or smaller.')
+    folder = DIRECTORY / 'uploads'
+    folder.mkdir(mode=0o700, exist_ok=True)
+    files = [p for p in folder.glob('*/*') if p.is_file()]
+    if len(files) >= 100 or sum(p.stat().st_size for p in files) + len(body) > UPLOAD_QUOTA:
+        raise ValueError('Upload storage is full. Remove unused files from the profile upload folder.')
+    private = Path(tempfile.mkdtemp(prefix='file-', dir=folder))
+    destination = private / name
+    try:
+        atomic(destination, body)
+    except BaseException:
+        private.rmdir()
+        raise
+    return destination
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Never log headers, bodies or credentials.
@@ -207,6 +233,28 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.headers.get('Origin') != 'https://' + self.headers.get('X-Forwarded-Host', ''):
             return self.reply(403, {'error': 'Request origin rejected.'})
+        if self.path == '/auth/upload':
+            with LOCK:
+                _, active = session(self)
+                if not active:
+                    return self.reply(401, {'error': 'Please sign in.'})
+                if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), active['csrf'].encode()):
+                    return self.reply(403, {'error': 'Reopen Upload and try again.'})
+                if self.headers.get('Content-Type') != 'application/octet-stream':
+                    return self.reply(415, {'error': 'A binary file is required.'})
+                try:
+                    length = int(self.headers.get('Content-Length', '-1'))
+                    if not 0 <= length <= UPLOAD_LIMIT:
+                        return self.reply(413, {'error': 'Files must be 32 MiB or smaller.'})
+                    body = self.rfile.read(length)
+                    if len(body) != length:
+                        return self.reply(400, {'error': 'Upload was incomplete. Please try again.'})
+                    path = save_upload(self.headers.get('X-Upload-Name', ''), body)
+                    return self.reply(201, {'path': str(path), 'name': path.name})
+                except (ValueError, UnicodeError) as error:
+                    return self.reply(400, {'error': str(error)})
+                except OSError:
+                    return self.reply(500, {'error': 'Could not save the file. Check available profile storage.'})
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.reply(415, {'error': 'JSON required.'})
         try:

@@ -112,3 +112,133 @@ fn redirect_updates_create_hops_but_late_updates_after_clear_do_not() {
     recorder.apply(late);
     assert!(recorder.rows.is_empty());
 }
+
+#[test]
+fn network_rows_handle_security_body_updates_filters_and_all_sorts() {
+    let mut r = Recorder::default();
+    r.apply(start("a", "tab"));
+    r.apply(start("b", "tab"));
+    r.apply(Update {
+        id: "a".into(),
+        owner: "tab".into(),
+        at: Instant::now(),
+        payload: Payload::Security("TLS 1.3".into()),
+    });
+    assert_eq!(r.rows[0].security, "TLS 1.3");
+    r.rows[0].response_body = Body::from_bytes(Some(b"retained"));
+    r.apply(Update {
+        id: "a".into(),
+        owner: "tab".into(),
+        at: Instant::now(),
+        payload: Payload::Response {
+            status: 200,
+            reason: "OK".into(),
+            headers: vec![("Content-Length".into(), "8".into())],
+            body: Body::default(),
+            cached: false,
+        },
+    });
+    assert_eq!(r.rows[0].response_body.text(), Some("retained"));
+    assert_eq!(r.rows[0].transfer(), Some(8));
+    r.rows[1].url = "https://z.example.com/z".into();
+    r.rows[1].status = Some(0);
+    r.rows[1].method = "POST".into();
+    r.rows[1].kind = "WS".into();
+    r.rows[1].cached = true;
+    r.rows[1].imported = true;
+    r.rows[1].transferred = Some(10);
+    r.rows[1].recorded_duration = Some(100.0);
+    r.rows[1].initiator = "script".into();
+    for sort in [
+        Sort::Started,
+        Sort::Status,
+        Sort::Method,
+        Sort::Domain,
+        Sort::File,
+        Sort::Type,
+        Sort::Size,
+        Sort::Transferred,
+        Sort::Duration,
+        Sort::Initiator,
+    ] {
+        r.sort = sort;
+        r.descending = false;
+        let ascending: Vec<_> = r.visible("tab").iter().map(|row| row.uid).collect();
+        r.descending = true;
+        let descending: Vec<_> = r.visible("tab").iter().map(|row| row.uid).collect();
+        // Stable equal-key sorting need not reverse equal elements.
+        if sort != Sort::Size {
+            assert_eq!(ascending, descending.into_iter().rev().collect::<Vec<_>>());
+        }
+    }
+    for query in [
+        "is:cached",
+        "is:imported",
+        "type:WS",
+        "status:Error",
+        "POST -example.com/data",
+    ] {
+        assert!(matches_query(&r.rows[1], query), "{query}");
+        assert!(!matches_query(&r.rows[0], query), "{query}");
+    }
+    assert!(matches_query(&r.rows[0], "https://example.com"));
+    assert_eq!(size_label(10), "10 B");
+    assert_eq!(size_label(1024), "1.00 kB");
+    assert_eq!(size_label(1048576), "1.00 MB");
+    r.rows[1].transferred = None;
+    assert_eq!(r.rows[1].transfer(), Some(0));
+    r.rows[1].url = "invalid".into();
+    assert_eq!(r.rows[1].domain(), "");
+    assert_eq!(r.rows[1].filename(), "invalid");
+    r.preserve = true;
+    r.navigation("tab");
+    assert_eq!(r.rows.len(), 2);
+    r.preserve = false;
+    r.navigation("tab");
+    assert!(r.rows.is_empty());
+    for i in 0..ROW_LIMIT + 1 {
+        r.apply(start(&i.to_string(), "tab"));
+    }
+    assert_eq!(r.rows.len(), ROW_LIMIT);
+    assert_eq!(r.rows.front().unwrap().id, "1");
+}
+
+#[test]
+fn request_replay_rejects_binary_nuls_and_malformed_headers() {
+    let mut r = Recorder::default();
+    r.apply(start("a", "tab"));
+    let row = &mut r.rows[0];
+    row.request_headers = vec![
+        ("content-length".into(), "2".into()),
+        ("connection".into(), "close".into()),
+        ("cookie".into(), "secret".into()),
+        ("X-Test".into(), "quote'".into()),
+    ];
+    let c = Composer::from_request(row);
+    assert_eq!(c.headers, "X-Test: quote'");
+    assert!(!row.curl().unwrap().contains("content-length"));
+    row.request_body = Body::from_bytes(Some(&[255]));
+    assert!(row.curl().unwrap_err().contains("Binary"));
+    row.request_body = Body::from_bytes(Some(b"a\0b"));
+    assert!(row.curl().unwrap_err().contains("NUL"));
+    let mut c = Composer {
+        url: "https://example.com".into(),
+        method: "POST".into(),
+        headers: "X-Test: value\n\n".into(),
+        body: "payload".into(),
+    };
+    let script = c.script().unwrap();
+    assert!(script.contains("payload"));
+    assert!(script.contains("x-test"));
+    for h in [
+        "missing separator",
+        "invalid name: value",
+        "valid: bad\0value",
+    ] {
+        c.headers = h.into();
+        assert!(c.script().is_err());
+    }
+    c.headers.clear();
+    c.method = "bad method".into();
+    assert!(c.script().is_err());
+}

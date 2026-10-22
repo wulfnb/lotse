@@ -480,3 +480,7 @@ impl Browser {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "console_ui_tests.rs"]
+mod tests;

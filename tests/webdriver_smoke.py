@@ -58,7 +58,14 @@ with (profile / 'browser.log').open('w') as log:
         assert 'needle' in request('GET', root + '/source')
         result = request('POST', root + '/execute/sync', {'script': 'return {sum:arguments[0]+arguments[1], title:document.title};', 'args': [20, 22]})
         assert result == {'sum': 42, 'title': 'Capability fixture'}, result
-        assert request('GET', root + '/window') in request('GET', root + '/window/handles')
+        handle = request('GET', root + '/window')
+        assert handle in request('GET', root + '/window/handles')
+        request('POST', root + '/window', {'handle': handle})
+        assert request('POST', root + '/window', {'handle': 'missing-tab'}, 404)['error'] == 'no such window'
+        assert request('POST', root + '/execute/sync', {'script': 'return arguments[0]', 'args': [{'element-6066-11e4-a52e-4f735466cecf':'unsupported'}]}, 500)['error'] == 'unsupported operation'
+        assert request('POST', root + '/execute/sync', {'script': 'throw new Error("test exception")', 'args': []}, 500)['error'] == 'javascript error'
+        for script, expected in [('return undefined', None), ('return null', None), ('return true', True), ('return 42', 42), ('return "string"', 'string'), ('return [1,2]', [1,2])]:
+            assert request('POST', root + '/execute/sync', {'script': script, 'args': []}) == expected
         fixture = os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767')
         request('POST', root + '/url', {'url': fixture + '/second.html'})
         title = request('GET', root + '/title')

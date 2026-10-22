@@ -9,6 +9,19 @@ The purple browser chrome follows the supplied Firefox reference. Tabs can be
 placed above the address bar or in a resizable sidebar and dragged to reorder.
 Changing layouts keeps the existing webviews and their page state alive.
 
+## Download
+
+[Website](https://wulfnb.github.io/lotse/) · [All releases](https://github.com/wulfnb/lotse/releases) · [SHA256 checksums](https://github.com/wulfnb/lotse/releases/download/test-preview/SHA256SUMS.txt)
+
+| Platform | Download Alpha Preview |
+| --- | --- |
+| macOS · Apple Silicon (ARM64) | [Download DMG](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg) · [Download ZIP](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.zip) |
+| Windows · x64 | [Download ZIP](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip) |
+| Linux · x86_64 | [Download tar.gz](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz) |
+
+These links download the current `test-preview` prerelease. Linux setup requirements
+are included in the archive's README.
+
 > ### ⚠️ Alpha Test Notice & Legal Disclaimer / Haftungsausschluss
 >
 > **This is an experimental Alpha preview (`v0.1.0-alpha.1`) intended strictly for testing, developer evaluation, and feedback.**
@@ -62,7 +75,21 @@ See the [Servo embedding guide](https://book.servo.org/embedding/overview.html).
 
 ## Docker
 
-Run our browser through a minimal HTTPS viewer, with a persistent profile:
+Run the [published Docker image](https://github.com/wulfnb/lotse/pkgs/container/lotse) through the HTTPS viewer with a persistent profile:
+
+```sh
+docker run -d \
+  --name lotse-browser \
+  -p 7443:7443 \
+  -e BROWSER_USER=servo \
+  -e BROWSER_PASSWORD='choose-a-strong-password' \
+  -v lotse-profile:/config \
+  ghcr.io/wulfnb/lotse:latest
+```
+
+Open **https://localhost:7443** and sign in as `servo` with your chosen password.
+
+To build and run from this repository with Docker Compose:
 
 ```sh
 cp .env.docker.example .env

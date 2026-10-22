@@ -33,7 +33,7 @@ class AuthHelpers:
         auth.ATTEMPTS.clear()
         auth.initialize()
 
-    def request(self, path, data=None, token=None, csrf=None, origin='https://test.local', content_type='application/json', raw=None, length=None):
+    def request(self, path, data=None, token=None, csrf=None, origin='https://test.local', content_type='application/json', raw=None, length=None, upload_name=None):
         handler = object.__new__(auth.Handler)
         handler.path = path
         handler.headers = Message()
@@ -41,6 +41,8 @@ class AuthHelpers:
         handler.headers['X-Forwarded-Host'] = 'test.local'
         handler.headers['X-Real-IP'] = 'test-client'
         handler.headers['Content-Type'] = content_type
+        if upload_name is not None:
+            handler.headers['X-Upload-Name'] = upload_name
         if token:
             handler.headers['Cookie'] = f'{auth.COOKIE}={token}'
         if csrf:
@@ -300,3 +302,49 @@ class SecurityRegressionTests(AuthHelpers, unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class UploadTests(AuthHelpers, unittest.TestCase):
+    def test_upload_requires_session_csrf_origin_and_bounded_binary_body(self):
+        token = self.login()
+        csrf = auth.SESSIONS[token]['csrf']
+        def upload(**kw):
+            args = dict(raw=b'file', token=token, csrf=csrf, content_type='application/octet-stream', upload_name='document.txt')
+            args.update(kw)
+            return self.request('/auth/upload', **args)
+        self.assertEqual(upload(token=None)[0], 401)
+        self.assertEqual(upload(csrf='wrong')[0], 403)
+        self.assertEqual(upload(origin='https://elsewhere')[0], 403)
+        self.assertEqual(upload(content_type='application/json')[0], 415)
+        self.assertEqual(upload(length=auth.UPLOAD_LIMIT+1)[0], 413)
+        self.assertEqual(upload(length='invalid')[0], 400)
+        self.assertEqual(upload(length=5)[0], 400)
+        self.assertEqual(upload(upload_name='../outside.txt')[0], 400)
+        self.assertEqual(upload(upload_name='%FF')[0], 400)
+        with patch.object(auth, 'save_upload', side_effect=OSError('disk full')):
+            self.assertEqual(upload()[0], 500)
+        status, result, _ = upload(raw=b'\x00binary\xff')
+        self.assertEqual(status, 201)
+        path = Path(result['path'])
+        self.assertTrue(path.is_relative_to(auth.DIRECTORY / 'uploads'))
+        self.assertEqual(path.read_bytes(), b'\x00binary\xff')
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(upload(raw=b'')[0], 201)
+
+    def test_upload_names_collisions_quota_and_failed_publication_are_safe(self):
+        for name in ['', '.', '..', 'a%2Fb', 'a%5Cb', 'a:b', '%00bad', 'x'*201]:
+            with self.assertRaises(ValueError):
+                auth.save_upload(name, b'body')
+        first = auth.save_upload('notes.txt', b'first')
+        second = auth.save_upload('notes.txt', b'second')
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.read_bytes(), b'first')
+        with patch.object(auth, 'UPLOAD_LIMIT', 1), self.assertRaises(ValueError):
+            auth.save_upload('big', b'xx')
+        with patch.object(auth, 'UPLOAD_QUOTA', 2), self.assertRaises(ValueError):
+            auth.save_upload('full', b'x')
+        before = set((auth.DIRECTORY / 'uploads').iterdir())
+        with patch.object(auth, 'atomic', side_effect=OSError('failed')), self.assertRaises(OSError):
+            auth.save_upload('failed.txt', b'failed')
+        self.assertEqual(set((auth.DIRECTORY / 'uploads').iterdir()), before)
+        self.assertEqual(first.read_bytes(), b'first')

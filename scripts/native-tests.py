@@ -26,14 +26,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--binary', default=str(root / 'target/debug/servo-browser'))
     parser.add_argument('--output', default=str(root / 'target/native-tests'))
-    parser.add_argument('--suite', choices=['all', 'smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media'], nargs='+', default=['all'])
+    parser.add_argument('--suite', choices=['all', 'smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media', 'capture'], nargs='+', default=['all'])
     args = parser.parse_args()
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
     result_path = output / "results.json"
     result = json.loads(result_path.read_text()) if result_path.exists() else []
     current_failed = False
-    for suite in ['smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media']:
+    for suite in ['smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media', 'capture']:
         if 'all' not in args.suite and suite not in args.suite:
             continue
         module = load(f'lotse_{suite}_fixture', root / 'tests' / ('download_server.py' if suite == 'download' else 'network_server.py'))
@@ -42,7 +42,7 @@ def main():
         if suite == 'smoke':
             server.smoke_reload_delay = 1.2
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        fixture = {'smoke': 'interaction.html', 'theme': 'interaction.html', 'capabilities': 'capabilities.html', 'toolbox': 'toolbox.html', 'download': '', 'webdriver': '', 'media': ''}[suite]
+        fixture = {'smoke': 'interaction.html', 'theme': 'interaction.html', 'capabilities': 'capabilities.html', 'toolbox': 'toolbox.html', 'download': '', 'webdriver': '', 'media': '', 'capture': 'capabilities.html'}[suite]
         # Keep artifacts, use a new profile on every invocation, never the user's profile.
         profile = Path(tempfile.mkdtemp(prefix=f'{suite}-', dir=output))
         command = [str(Path(args.binary).resolve()), f'--{suite}-test', '--profile-dir', str(profile), f'http://127.0.0.1:{server.server_port}/{fixture}']
@@ -50,6 +50,8 @@ def main():
         if suite in ('webdriver', 'media'):
             environment.update(LOTSE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}', LOTSE_TEST_OUTPUT=str(output))
             command = [sys.executable, str(root / 'tests' / ('webdriver_smoke.py' if suite == 'webdriver' else 'media_smoke.py')), str(Path(args.binary).resolve())]
+        if suite == 'capture':
+            command = [str(Path(args.binary).resolve()), '--profile-dir', str(profile), '--capture', str(profile / 'page.png'), f'http://127.0.0.1:{server.server_port}/capabilities.html']
         started = time.monotonic()
         try:
             with (profile / 'browser.log').open('w') as log:
@@ -63,6 +65,13 @@ def main():
                         subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], check=False)
                     process.wait()
                     status = 124
+            if status == 0 and suite == 'capture':
+                capture = profile / 'page.png'
+                report = profile / 'page.json'
+                if not capture.exists() or not capture.read_bytes().startswith(b'\x89PNG\r\n\x1a\n') or not report.exists() or json.loads(report.read_text()).get('title') != 'Capability fixture':
+                    status = 1
+                    with (profile / 'browser.log').open('a') as log:
+                        log.write('Capture did not produce a valid PNG and expected document report\n')
         finally:
             server.shutdown()
             server.server_close()

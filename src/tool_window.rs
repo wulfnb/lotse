@@ -13,7 +13,7 @@ pub use servo_browser::model::Dock;
 pub struct ToolWindow {
     pub window: Window,
     context: WindowRenderingContext,
-    gui: egui_glow::EguiGlow,
+    pub(crate) gui: egui_glow::EguiGlow,
     last_frame: Instant,
     pub frames: u64,
     modifiers: winit::keyboard::ModifiersState,
@@ -69,6 +69,7 @@ impl Browser {
                 let window = event_loop
                     .create_window(
                         Window::default_attributes()
+                            .with_visible(false)
                             .with_title(format!("Developer Tools — {}", crate::brand::APP_NAME))
                             .with_inner_size(winit::dpi::LogicalSize::new(1100.0, 720.0))
                             .with_min_inner_size(winit::dpi::LogicalSize::new(480.0, 360.0)),
@@ -81,13 +82,16 @@ impl Browser {
                 )
                 .map_err(|e| format!("{e:?}"))?;
                 context.make_current().map_err(|e| format!("{e:?}"))?;
-                let gui = egui_glow::EguiGlow::new(
+                let mut gui = egui_glow::EguiGlow::new(
                     event_loop,
                     context.glow_gl_api(),
                     None,
                     Some(window.scale_factor() as f32),
                     false,
                 );
+                gui.egui_winit
+                    .init_accesskit(event_loop, &window, self.event_proxy.clone());
+                window.set_visible(true);
                 Ok(ToolWindow {
                     window,
                     context,

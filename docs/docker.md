@@ -243,3 +243,30 @@ about 239 MiB and 1.3% CPU at idle with one Example Domain tab, a connected view
 not just the browser process. Both Linux integration suites, remote menu input,
 static-frame delivery and session restoration after restart were verified.
 These are measurements for that workload, not limits or a Firefox benchmark.
+
+
+## Viewer uploads and display modes
+
+Use **Upload** in the HTTPS viewer to select a file from your local computer.
+After it finishes, copy the returned remote path into the website's file chooser
+inside Lotse. These are different filesystems: a local path alone cannot select
+an item inside the container. Uploads require the active session and CSRF token,
+are limited to 32 MiB each, and remain privately under `/config/auth/uploads` in
+the persistent profile until the administrator removes them. The upload area is
+limited to 256 MiB and 100 files and is not available through the HTTP download
+listing.
+
+The **View** selector offers Fit to window, Actual size / pan, and Resize remote
+desktop. If remote resizing is unsupported by the VNC server, return to Fit or
+use Actual size and scroll. **Full screen** remains available. Desktop file-open
+and folder-reveal actions are not exposed as server-side launches in the viewer;
+use **Downloads** to save completed downloads to your computer.
+
+To test the current gateway/viewer/nginx files with an existing local image:
+
+```sh
+python3 scripts/docker-ux-test.py servo-browser:local
+```
+
+This creates and removes its own container and temporary profile. CI runs the
+same check against the image it has just built.

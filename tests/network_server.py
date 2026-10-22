@@ -13,7 +13,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header('Cache-Control', 'no-store')
         if self.path.split('?', 1)[0] == '/toolbox.html':
             self.send_header('Set-Cookie', 'lotse_visible=visible-fixture; Path=/; SameSite=Lax')
-            self.send_header('Set-Cookie', 'lotse_http_only=native-only-fixture; Path=/; HttpOnly; SameSite=Strict')
+            self.send_header('Set-Cookie', 'lotse_http_only=native-only-fixture; Path=/; HttpOnly; SameSite=Strict; Expires=Wed, 21 Oct 2037 07:28:00 GMT')
             self.send_header('Set-Cookie', 'lotse_wrong_path=not-for-page; Path=/different-cookie-scope; HttpOnly')
         super().end_headers()
     def send_json(self, status, data):
@@ -30,6 +30,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.server.interaction_visits = visits + 1
             if visits:
                 time.sleep(getattr(self.server, 'smoke_reload_delay', 0))
+        if self.path.startswith('/auth-fixture-'):
+            if self.headers.get('Authorization') == 'Basic Zml4dHVyZTp0ZXN0LXBhc3M=':
+                self.send_json(200, {'authenticated': True})
+            else:
+                self.send_response(401)
+                self.send_header('WWW-Authenticate', 'Basic realm="' + self.path.strip('/') + '"')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+            return
         if self.path.startswith('/api/data'):
             time.sleep(0.12)
             self.send_json(200, {'message': 'real network response', 'items': [1, 2, 3]})

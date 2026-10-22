@@ -2,6 +2,7 @@
 """Account for every first-party code file; never drop unmeasured code from the gate."""
 import argparse
 import fnmatch
+import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import sys
@@ -23,13 +24,14 @@ def relative(path, root=ROOT):
         return None
 
 
-def inventory(root, policy, rust_reports, python_report, javascript=None):
+def inventory(root, policy, rust_reports, python_report, javascript=None, shell=None):
     measured = {}
     builds = set()
     failed_builds = []
     for report, metadata in rust_reports:
         if metadata.get('source_error'):
             failed_builds.append(metadata['source_error'])
+            continue  # Counters from different sources cannot describe this checkout.
         if metadata.get('tests_passed') is False:
             failed_builds.append(metadata.get('platform', 'unknown'))
         platform = next((line.split(': ', 1)[1] for line in metadata.get('platform', '').splitlines() if line.startswith('host:')), 'unknown')
@@ -55,6 +57,17 @@ def inventory(root, policy, rust_reports, python_report, javascript=None):
         measured.setdefault(name, []).append({'build': 'python', 'lines': {'count': total['num_statements'], 'covered': total['covered_lines']}, 'branches': {'count': total['num_branches'], 'covered': total['covered_branches']}, 'uncovered_lines': record.get('missing_lines', [])})
     for name, sample in (javascript or {}).items():
         measured.setdefault(name, []).append({'build': 'node', **sample})
+    if shell:
+        metadata = shell.get('metadata', {})
+        if metadata.get('tests_passed') is not True:
+            failed_builds.append('shell contracts failed or unverifiable')
+        for name, sample in shell.get('files', {}).items():
+            path = root / name
+            expected = metadata.get('source_hashes', {}).get(name)
+            if not path.is_file() or not expected or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                failed_builds.append(name + ': stale or unverifiable shell sources')
+                continue
+            measured.setdefault(name, []).append({'build': 'linux-shell-contracts', **sample})
     entries = []
     files = sorted({path for pattern in policy['include'] for path in root.glob(pattern) if path.is_file()})
     for path in files:
@@ -123,7 +136,15 @@ def main(argv=None):
     python_path = ROOT / 'target/coverage/python/coverage.json'
     javascript_path = ROOT / 'target/coverage/javascript/lcov.info'
     javascript = parse_lcov(javascript_path.read_text()) if javascript_path.exists() else {}
-    report = inventory(ROOT, policy, rust, json.loads(python_path.read_text()) if python_path.exists() else {}, javascript)
+    shell_directory = ROOT / 'target/coverage/shell'
+    shell = None
+    if (shell_directory / 'lcov.info').exists():
+        try:
+            metadata = json.loads((shell_directory / 'measurement.json').read_text())
+        except (OSError, ValueError):
+            metadata = {}
+        shell = {'files': parse_lcov((shell_directory / 'lcov.info').read_text()), 'metadata': metadata}
+    report = inventory(ROOT, policy, rust, json.loads(python_path.read_text()) if python_path.exists() else {}, javascript, shell)
     destination = ROOT / 'target/coverage'
     destination.mkdir(parents=True, exist_ok=True)
     (destination / 'inventory.json').write_text(json.dumps(report, indent=2) + '\n')

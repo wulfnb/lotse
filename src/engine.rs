@@ -13,6 +13,13 @@ pub enum Wake {
     Ui,
     Media(servo::MediaSessionActionType),
     ToggleMedia,
+    Accessibility(std::sync::Arc<egui_winit::accesskit_winit::Event>),
+}
+
+impl From<egui_winit::accesskit_winit::Event> for Wake {
+    fn from(event: egui_winit::accesskit_winit::Event) -> Self {
+        Self::Accessibility(std::sync::Arc::new(event))
+    }
 }
 
 #[derive(Clone)]
@@ -38,6 +45,9 @@ pub enum Event {
     Favicon(String, servo::Image),
     Prompt(crate::capabilities::Prompt),
     Status(String),
+    Notice(crate::ux::Notice),
+    NativeAccessibility(WebViewId, servo::accesskit::TreeUpdate),
+    Settings,
     Closed(WebViewId),
     Crashed(WebViewId, String),
     Popup(servo::CreateNewWebViewRequest),
@@ -62,6 +72,16 @@ pub struct Delegate {
 impl Delegate {
     pub fn report(&self, message: String) {
         self.push(Event::Status(message));
+    }
+    pub fn notice(
+        &self,
+        severity: crate::ux::Severity,
+        message: String,
+        path: Option<std::path::PathBuf>,
+    ) {
+        self.push(Event::Notice(crate::ux::Notice::new(
+            severity, message, path,
+        )));
     }
     fn push(&self, event: Event) {
         self.events.borrow_mut().push_back(event);
@@ -103,7 +123,14 @@ impl servo::WebViewDelegate for Delegate {
             decision: crate::capabilities::Decision::Servo(request),
         }));
     }
-    fn request_navigation(&self, _: WebView, request: servo::NavigationRequest) {
+    fn request_navigation(&self, view: WebView, request: servo::NavigationRequest) {
+        if request.url.scheme() == "lotse"
+            && request.url.host_str() == Some("settings")
+            && view.url().is_some_and(|u| u.scheme() == "lotse")
+        {
+            self.push(Event::Settings);
+        }
+
         if matches!(request.url.scheme(), "lotse" | "servo")
             && request.url.host_str() == Some("download")
         {
@@ -236,6 +263,7 @@ impl servo::WebViewDelegate for Delegate {
         view: WebView,
         update: servo::accesskit::TreeUpdate,
     ) {
+        self.push(Event::NativeAccessibility(view.id(), update.clone()));
         let tree = update.tree_id;
         let nodes = update
             .nodes

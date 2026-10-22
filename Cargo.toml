@@ -8,7 +8,7 @@ license = "MPL-2.0"
 
 [features]
 default = ["desktop", "brotli-streams", "media"]
-desktop = ["dep:egui", "dep:egui_glow", "dep:winit", "dep:servo", "dep:euclid", "dep:dpi", "dep:rustls", "dep:arboard", "dep:servo-devtools-traits", "dep:servo-base", "dep:crossbeam-channel", "dep:webdriver", "dep:base64", "dep:image", "dep:http", "dep:libc", "dep:pkcs1", "dep:objc2", "dep:block2", "dep:objc2-app-kit", "dep:objc2-foundation"]
+desktop = ["dep:rfd", "dep:accesskit", "dep:egui-winit", "dep:egui", "dep:egui_glow", "dep:winit", "dep:servo", "dep:euclid", "dep:dpi", "dep:rustls", "dep:arboard", "dep:servo-devtools-traits", "dep:servo-base", "dep:crossbeam-channel", "dep:webdriver", "dep:base64", "dep:image", "dep:http", "dep:libc", "dep:pkcs1", "dep:objc2", "dep:block2", "dep:objc2-app-kit", "dep:objc2-foundation"]
 test-harness = ["desktop"]
 brotli-streams = ["desktop", "servo/brotli-compression-stream"]
 multiprocess = ["desktop", "servo/multiprocess"]
@@ -20,6 +20,9 @@ path = "src/main.rs"
 required-features = ["desktop"]
 
 [dependencies]
+rfd = { version = "=0.17.2", optional = true }
+accesskit = { version = "=0.25.1", features = ["serde"], optional = true }
+egui-winit = { version = "=0.37.0", features = ["accesskit"], optional = true }
 egui = { optional = true, version = "=0.37.0", features = ["default_fonts"] }
 egui_glow = { optional = true, version = "=0.37.0", features = ["winit"] }
 winit = { version = "0.30.13", optional = true }

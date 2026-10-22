@@ -15,7 +15,25 @@ pub fn modifiers(mods: Modifiers) -> servo::Modifiers {
 }
 
 pub fn keyboard(view: &WebView, event: &KeyEvent, mods: Modifiers) {
-    let key = match &event.logical_key {
+    view.notify_input_event(InputEvent::Keyboard(keyboard_input(
+        &event.logical_key,
+        event.physical_key,
+        event.location,
+        event.state,
+        mods,
+        event.repeat,
+    )));
+}
+
+fn keyboard_input(
+    logical_key: &Key,
+    physical_key: PhysicalKey,
+    key_location: KeyLocation,
+    state: ElementState,
+    mods: Modifiers,
+    repeat: bool,
+) -> servo::KeyboardEvent {
+    let key = match logical_key {
         Key::Character(text) => servo::Key::Character(text.to_string()),
         Key::Named(named) => servo::Key::Named(
             format!("{named:?}")
@@ -24,33 +42,31 @@ pub fn keyboard(view: &WebView, event: &KeyEvent, mods: Modifiers) {
         ),
         Key::Dead(_) | Key::Unidentified(_) => servo::Key::Named(servo::NamedKey::Unidentified),
     };
-    let code = match event.physical_key {
+    let code = match physical_key {
         PhysicalKey::Code(code) => format!("{code:?}")
             .parse()
             .unwrap_or(servo::Code::Unidentified),
         _ => servo::Code::Unidentified,
     };
-    let location = match event.location {
+    let location = match key_location {
         KeyLocation::Left => servo::Location::Left,
         KeyLocation::Right => servo::Location::Right,
         KeyLocation::Numpad => servo::Location::Numpad,
         _ => servo::Location::Standard,
     };
-    view.notify_input_event(InputEvent::Keyboard(
-        servo::KeyboardEvent::new_without_event(
-            if event.state == ElementState::Pressed {
-                servo::KeyState::Down
-            } else {
-                servo::KeyState::Up
-            },
-            key,
-            code,
-            location,
-            modifiers(mods),
-            event.repeat,
-            false,
-        ),
-    ));
+    servo::KeyboardEvent::new_without_event(
+        if state == ElementState::Pressed {
+            servo::KeyState::Down
+        } else {
+            servo::KeyState::Up
+        },
+        key,
+        code,
+        location,
+        modifiers(mods),
+        repeat,
+        false,
+    )
 }
 
 pub fn cursor(cursor: servo::Cursor) -> winit::window::CursorIcon {
@@ -70,3 +86,7 @@ pub fn cursor(cursor: servo::Cursor) -> winit::window::CursorIcon {
         _ => C::Default,
     }
 }
+
+#[cfg(test)]
+#[path = "input_tests.rs"]
+mod tests;

@@ -65,6 +65,7 @@ pub struct Browser {
     pub(crate) features: crate::capabilities::State,
     pub(crate) documents: crate::capabilities::Documents,
     pub(crate) window: Rc<Window>,
+    pub(crate) event_proxy: EventLoopProxy<Wake>,
     pub(crate) native_media: crate::native_media::NativeMedia,
     pub(crate) native_theme: Option<crate::native_theme::NativeTheme>,
     session: Session<Tab>,
@@ -87,6 +88,7 @@ pub struct Browser {
     pub(crate) authentications: VecDeque<servo::AuthenticationRequest>,
     pub(crate) controls: VecDeque<(servo::WebViewId, servo::EmbedderControl)>,
     pub(crate) status: Option<String>,
+    pub(crate) accessibility: crate::accessibility::State,
     pub(crate) resources: crate::resources::Monitor,
     pub(crate) downloads: crate::downloads::Manager,
     pub(crate) download_ui: crate::downloads_ui::State,
@@ -141,13 +143,15 @@ impl Browser {
         context
             .make_current()
             .map_err(|e| format!("Cannot activate GPU context: {e:?}"))?;
-        let gui = egui_glow::EguiGlow::new(
+        let mut gui = egui_glow::EguiGlow::new(
             event_loop,
             context.glow_gl_api(),
             None,
             Some(window.scale_factor() as f32),
             false,
         );
+        gui.egui_winit
+            .init_accesskit(event_loop, &window, proxy.clone());
         let native_theme = crate::native_theme::NativeTheme::new(&window).ok();
         let system_dark = window.theme() != Some(winit::window::Theme::Light);
         if let Some(native) = &native_theme {
@@ -199,6 +203,10 @@ impl Browser {
             .preferences(servo::Preferences {
                 devtools_server_enabled: options.remote_devtools.is_some(),
                 accessibility_enabled: true,
+                // Exercise permission responders in the native harness without
+                // exposing Servo's experimental notification API in releases.
+                #[cfg(feature = "test-harness")]
+                dom_notification_enabled: true,
                 devtools_server_listen_address: format!(
                     "127.0.0.1:{}",
                     options.remote_devtools.unwrap_or(7000)
@@ -206,7 +214,7 @@ impl Browser {
                 ..Default::default()
             })
             .opts(opts)
-            .event_loop_waker(Box::new(engine::Waker(proxy)));
+            .event_loop_waker(Box::new(engine::Waker(proxy.clone())));
         if options.remote_devtools.is_none() {
             builder = builder.devtools_event_sender(tools.bridge.sender.clone());
         }
@@ -269,6 +277,7 @@ impl Browser {
             documents,
             favicons,
             window,
+            event_proxy: proxy.clone(),
             native_theme,
             native_media,
             session: Session::default(),
@@ -295,6 +304,7 @@ impl Browser {
             permissions: Default::default(),
             authentications: VecDeque::new(),
             controls: VecDeque::new(),
+            accessibility: Default::default(),
             status: if options.remote_devtools.is_some() {
                 Some("Remote DevTools mode: native Network/Debugger recording is disabled. Connect Firefox via about:debugging.".into())
             } else {
@@ -344,6 +354,7 @@ impl Browser {
             browser.add_tab(profile::HOME);
         }
         browser.select_tab(saved_active.min(browser.session.tabs().len() - 1));
+        browser.window.set_visible(true);
         browser.window.set_ime_allowed(true);
         browser.window.request_redraw();
         Ok(browser)
@@ -528,6 +539,9 @@ impl Browser {
         let _ = self.dispatch_navigation(servo_browser::navigation::Command::Traverse { forward });
     }
     pub(crate) fn navigate(&mut self, address: &str) {
+        if address == "lotse://settings" {
+            self.features.settings = true;
+        }
         match profile::resolve_address(address) {
             Ok(url) => {
                 let active = self.session.active();
@@ -565,6 +579,20 @@ impl Browser {
             native.apply(theme, dark);
         }
         crate::theme::install(ctx, theme.palette(dark, self.native_theme.is_some()));
+        let p = theme.palette(dark, false);
+        let css = serde_json::to_string(&crate::capabilities::theme_stylesheet(p)).unwrap();
+        let script = format!(
+            "document.getElementById('lotse-theme')?.replaceChildren(document.createTextNode({css}))"
+        );
+        for tab in self.session.tabs() {
+            if tab
+                .view
+                .url()
+                .is_some_and(|u| matches!(u.scheme(), "lotse" | "servo"))
+            {
+                tab.view.evaluate_javascript(script.clone(), |_| {});
+            }
+        }
         self.changed();
     }
     pub(crate) fn bookmark(&mut self) {
@@ -615,7 +643,9 @@ impl Browser {
         if !self.chrome.show_console && self.tools.attention.is_none() {
             self.tools.resume_all();
             for tab in self.session.tabs() {
-                tab.view.set_accessibility_active(false);
+                if !self.accessibility.active {
+                    tab.view.set_accessibility_active(false);
+                }
             }
         }
         if let Some(owner) = self.tools.attention.take() {
@@ -727,6 +757,23 @@ impl Browser {
                     self.window.request_redraw();
                 }
                 Event::Prompt(prompt) => self.features.prompts.push_back(prompt),
+                Event::Settings => self.features.settings = true,
+                Event::Notice(notice) => {
+                    self.status = None;
+                    self.chrome.notice = Some(notice);
+                }
+                Event::NativeAccessibility(id, update) => {
+                    #[cfg(feature = "test-harness")]
+                    if self.toolbox_test.is_some() {
+                        crate::accessibility::tree(update.clone()).expect(
+                            "Real Servo accessibility tree must convert without losing semantics",
+                        );
+                    }
+
+                    if self.accessibility.active && id == self.tab().view.id() {
+                        self.accessibility.pending.push((id, update));
+                    }
+                }
                 Event::Status(message) => {
                     eprintln!("{message}");
                     self.status = Some(message);
@@ -954,6 +1001,8 @@ impl Browser {
 
     pub(crate) fn modal(&self) -> bool {
         self.features.clear_data
+            || self.features.delete_site.is_some()
+            || self.chrome.confirm_clear_history
             || !self.features.bluetooth.is_empty()
             || !self.features.prompts.is_empty()
             || !self.permissions.is_empty()
@@ -988,15 +1037,15 @@ impl Browser {
         }
     }
 
-    fn shortcut(&mut self, event: &winit::event::KeyEvent) -> bool {
+    pub(crate) fn shortcut_key(&mut self, key: &Key, key_state: ElementState) -> bool {
         let state = self.chrome.modifiers.state();
         let command = if cfg!(target_os = "macos") {
             state.super_key()
         } else {
             state.control_key()
         };
-        let pressed = event.state == ElementState::Pressed;
-        let character = match &event.logical_key {
+        let pressed = key_state == ElementState::Pressed;
+        let character = match key {
             Key::Character(c) => c.to_lowercase(),
             _ => String::new(),
         };
@@ -1072,11 +1121,34 @@ impl Browser {
             return true;
         }
         if pressed {
-            if self.debugger_shortcut(&event.logical_key, state.shift_key()) {
+            if self.debugger_shortcut(key, state.shift_key()) {
                 return true;
             }
-            match event.logical_key {
+            match key {
                 Key::Named(NamedKey::F12) => self.toggle_developer_tools(),
+                Key::Named(NamedKey::F6) => {
+                    if self.chrome.page_focused {
+                        self.chrome.focus_address = true;
+                        self.chrome.page_focused = false;
+                        self.tab().view.set_focused(false);
+                    } else {
+                        if let Some(gui) = &self.gui {
+                            gui.egui_ctx.memory_mut(|m| {
+                                if let Some(id) = m.focused() {
+                                    m.surrender_focus(id);
+                                }
+                            });
+                        }
+                        self.chrome.page_focused = true;
+                        self.tab().view.set_focused(true);
+                    }
+                }
+                Key::Named(NamedKey::Escape)
+                    if self.chrome.show_history || self.chrome.show_bookmarks =>
+                {
+                    self.chrome.show_history = false;
+                    self.chrome.show_bookmarks = false;
+                }
                 Key::Named(NamedKey::Escape) if self.cancel_element_picker() => {}
                 Key::Named(NamedKey::Escape)
                     if self.chrome.show_console
@@ -1127,7 +1199,7 @@ impl Browser {
             self.chrome.modifiers = *mods;
         }
         if let WindowEvent::KeyboardInput { event, .. } = &event {
-            if self.shortcut(event) {
+            if !self.modal() && self.shortcut_key(&event.logical_key, event.state) {
                 self.pump();
                 return;
             }
@@ -1311,6 +1383,7 @@ impl Browser {
         let mut gui = self.gui.take().unwrap();
         let window = self.window.clone();
         gui.run(&window, |ui| self.ui(ui));
+        self.flush_accessibility(&mut gui);
         // Servo may bind its framebuffer while painting. Restore the window target before egui.
         if self.tab().crash.is_none() {
             self.tab().view.paint();
@@ -1457,6 +1530,7 @@ impl Browser {
             outer.shrink(8.0)
         };
         self.chrome.page_rect = rect;
+        self.accessibility_viewport(ui, rect);
         if let Some(reason) = self.tab().crash.clone() {
             ui.centered_and_justified(|ui| {
                 ui.vertical_centered(|ui| {

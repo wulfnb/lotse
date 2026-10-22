@@ -45,10 +45,12 @@ the gateway's unexecuted process/CLI paths; it does not hide them to inflate the
 result. Python's percentage combines statements and branches. These two figures
 are separate metrics and must not be averaged into a whole-browser percentage.
 
-`coverage-baseline.json` now requires **100% lines**, as requested. Exact covered
-and total counts are compared; a displayed rounded 100% cannot pass with a missed
-line. Branches remain informational. The gate is currently red because the Rust
-core is below target. Do not lower thresholds or add exclusions to conceal gaps.
+`coverage-baseline.json` retains the existing component regression gates: 95%
+Rust core lines and 100% gateway lines. The separate whole-project completion
+gate requires **100% lines**, as requested. Exact covered and total counts are
+compared; a displayed rounded 100% cannot pass with a missed line. Branches remain
+informational. Passing the component regression gates does not establish the
+whole-project target. Do not lower thresholds or add exclusions to conceal gaps.
 
 For real desktop coverage (unit tests plus all native suites):
 
@@ -56,6 +58,11 @@ For real desktop coverage (unit tests plus all native suites):
 python3 scripts/desktop-coverage.py
 python3 scripts/desktop-coverage.py --report-only
 ```
+
+The compiler wrapper is compiled from `scripts/coverage-rustc.rs` for the host,
+including Windows; it does not require a POSIX shell on Windows. Use
+`--core-only --output target/coverage/builds/<platform>-core` for a separate core
+measurement. Required desktop configurations still need their own native runs.
 
 Reports are in `target/coverage/desktop/`. A local `objects/` snapshot preserves
 the instrumented executable when a normal build replaces `target/debug/servo-browser`.
@@ -79,7 +86,7 @@ rustup component add llvm-tools-preview --toolchain nightly
 RUSTUP_TOOLCHAIN=nightly LOTSE_COVERAGE_BRANCH=1 python3 scripts/desktop-coverage.py --core-only --output target/coverage/core-branches
 ```
 
-For all six standalone JavaScript files (Node 26, no npm dependencies):
+For all seven standalone JavaScript files (Node 26, no npm dependencies):
 
 ```sh
 sh scripts/javascript-coverage.sh
@@ -94,6 +101,21 @@ For the whole-project audit and strict completion gate:
 python3 scripts/coverage-inventory.py
 python3 scripts/coverage-inventory.py --require-complete
 ```
+
+For production shell scripts, run the isolated Linux contract suite with actual
+kcov counters (build the base application image first):
+
+```sh
+docker build -f docker/coverage.Dockerfile --build-arg LOTSE_BASE=servo-browser:local -t lotse-coverage-tools:local .
+mkdir -p target/coverage/shell
+docker run --rm -v "$PWD:/source:ro" -v "$PWD/target/coverage/shell:/output" lotse-coverage-tools:local python3 /source/tests/shell_contracts.py --source /source --output /output
+```
+
+These contracts execute entrypoint/startup and packaging scripts in a disposable
+filesystem. Compiler, media bundler and long-running service processes are test
+ports; this does not certify the resulting native application packages. The
+inventory rejects failed suites, missing manifests and mismatched source hashes.
+See [coverage progress](coverage-progress.md) for current evidence and gaps.
 
 `coverage-policy.json` enumerates source patterns, explicit test/dependency
 classifications and required builds. Missing measurements never count as covered.
@@ -171,3 +193,22 @@ sources. The whole-project inventory rejects stale manifests and empty platform
 reports, even if their recorded counters say 100%. Regenerate measurements after
 source changes. Native driver results and missing platforms remain separate
 requirements from line coverage.
+
+
+## UI/UX regressions
+
+The native capabilities suite now verifies prompt defaults, explicitly empty
+prompt values, Escape cancellation, live internal-page theme updates, new-tab
+search and the 720×480 library overlay. Toolbar semantic labels and AccessKit
+schema conversion have Rust tests. Keyboard users can use F6 to move between the
+address bar and page.
+
+`sh scripts/javascript-coverage.sh` also measures `site/site.js` at 100% lines and
+runs its clipboard success/failure checks. Docker viewer tests cover viewport
+modes and upload behavior. Python tests cover upload authentication, CSRF,
+filename rejection, limits, private storage, collisions and publication failures.
+`python3 scripts/docker-ux-test.py IMAGE` verifies the gateway and nginx path in a
+disposable container; see [Docker documentation](docker.md).
+
+See [UI/UX implementation](ui-ux-implementation.md) for the item-by-item changes,
+current measurements and manual OS/assistive-technology validation boundaries.

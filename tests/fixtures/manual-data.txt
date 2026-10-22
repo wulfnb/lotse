@@ -1,0 +1,1 @@
+Lotse coverage fixture. This file contains no user data.

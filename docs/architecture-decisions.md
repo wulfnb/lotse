@@ -26,8 +26,21 @@ indirection without improving the application boundary. Native test drivers can
 inspect adapter details for integration assertions; application changes follow
 the same operations as interactive use.
 
-Remaining verification obligations are tracked in [quality-report.md](quality-report.md):
-100% line coverage has not been achieved across Rust, shell files or all required
-build configurations. Windows directory durability, physical permissions and
+Input translation is separated from delivery: `input::keyboard_input` converts
+ordinary keyboard values, while the public adapter sends the resulting event to
+Servo. Browser shortcuts similarly accept logical key/state values and use the
+same tab/navigation operations as other entry points. Tests can exercise these
+boundaries without constructing platform-private winit event fields or replacing
+the real engine with a simulated browser.
+
+Accessibility node builders must not re-enter egui Context while its write lock
+is held. Context values are read before the callback, and a real native
+activation/grafting contract guards this lock-order requirement.
+
+Remaining verification obligations are tracked in [quality-report.md](quality-report.md)
+and the newer [coverage progress report](coverage-progress.md): 100% line
+coverage has not been achieved across Rust or all required build configurations.
+Shell process contracts now have complete line counters; native packages still
+need platform verification. Windows directory durability, physical permissions and
 remote CI execution are not certified by macOS tests. These are open checks,
 not completed architectural results.

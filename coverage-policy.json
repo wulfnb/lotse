@@ -3,11 +3,13 @@
   "include": [
     "src/**/*.rs",
     "src/**/*.js",
+    "site/**/*.js",
     "docker/**/*.py",
     "docker/**/*.js",
     "docker/**/*.sh",
     "scripts/**/*.py",
-    "scripts/**/*.sh"
+    "scripts/**/*.sh",
+    "scripts/**/*.rs"
   ],
   "test_only": [
     "src/*_tests.rs",
@@ -27,7 +29,9 @@
     "scripts/desktop-coverage.py",
     "scripts/check-coverage.py",
     "scripts/coverage-inventory.py",
-    "scripts/coverage_sources.py"
+    "scripts/coverage_sources.py",
+    "scripts/docker-ux-test.py",
+    "scripts/coverage-rustc.rs"
   ],
   "declaration_only": [
     "src/lib.rs",

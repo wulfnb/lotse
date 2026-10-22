@@ -143,3 +143,7 @@ impl Browser {
         action
     }
 }
+
+#[cfg(test)]
+#[path = "network_controls_tests.rs"]
+mod tests;

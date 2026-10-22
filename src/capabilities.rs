@@ -53,6 +53,9 @@ pub struct State {
     pub media_owner: Option<servo::WebViewId>,
     pub site_info: bool,
     pub clear_data: bool,
+    pub delete_site: Option<String>,
+    pub settings_section: usize,
+    pub diagnostics: bool,
     pub prompts: VecDeque<Prompt>,
     pub sites: Vec<(String, String)>,
     pub cookies: Vec<String>,
@@ -85,7 +88,7 @@ impl ProtocolHandler for InternalPages {
             http::header::CONTENT_TYPE,
             http::HeaderValue::from_static("text/html; charset=utf-8"),
         );
-        response.headers.insert(http::header::CONTENT_SECURITY_POLICY, http::HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"));
+        response.headers.insert(http::header::CONTENT_SECURITY_POLICY, http::HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action https://www.google.com; frame-ancestors 'none'"));
         *response.body.lock() = ResponseBody::Done(body.into_bytes());
         Box::pin(std::future::ready(response))
     }
@@ -98,9 +101,22 @@ pub fn html(value: &str) -> String {
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
 }
-pub fn document(title: &str, body: &str) -> String {
+pub fn theme_stylesheet(palette: crate::theme::Palette) -> String {
+    let hex = |c: egui::Color32| format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b());
     format!(
-        "<!doctype html><meta charset=utf-8><title>{}</title><style>html{{font:16px system-ui;color:#edfff7;background:#061b18}}body{{max-width:850px;margin:64px auto;padding:24px}}a{{color:#93f5d5}}li{{margin:14px 0}}p{{line-height:1.6}}</style><nav><a href='lotse://newtab'>New tab</a> · <a href='lotse://history'>History</a> · <a href='lotse://bookmarks'>Bookmarks</a> · <a href='lotse://settings'>Settings</a></nav><h1>{}</h1>{body}",
+        ":root{{--lotse-text:{};--lotse-background:{};--lotse-accent:{};--lotse-surface:{};--lotse-border:{};--lotse-selected:{}}}",
+        hex(palette.text),
+        hex(palette.inset),
+        hex(palette.accent),
+        hex(palette.surface),
+        hex(palette.border),
+        hex(palette.selected)
+    )
+}
+pub fn document(title: &str, body: &str, palette: crate::theme::Palette) -> String {
+    let variables = theme_stylesheet(palette);
+    format!(
+        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{}</title><style id='lotse-theme'>{variables}</style><style>html{{font:16px system-ui;color:var(--lotse-text);background:var(--lotse-background)}}body{{max-width:850px;margin:48px auto;padding:24px}}a{{color:var(--lotse-accent)}}input,button{{font:inherit;padding:12px;border-radius:8px;max-width:100%;box-sizing:border-box;background:var(--lotse-surface);color:var(--lotse-text);border:1px solid var(--lotse-border)}}button{{background:var(--lotse-selected);cursor:pointer}}.search-controls{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.search-controls input{{width:400px;min-width:0}}.search-controls input,.search-controls button{{height:48px}}nav{{display:flex;flex-wrap:wrap;gap:12px}}:focus-visible{{outline:3px solid var(--lotse-accent);outline-offset:4px}}li{{margin:14px 0}}p{{line-height:1.6}}</style></head><body><nav aria-label='Browser pages'><a href='lotse://newtab'>New tab</a> · <a href='lotse://history'>History</a> · <a href='lotse://bookmarks'>Bookmarks</a> · <a href='lotse://settings'>Settings</a></nav><main><h1>{}</h1>{body}</main></body></html>",
         html(title),
         html(title)
     )

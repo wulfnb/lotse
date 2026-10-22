@@ -1,5 +1,10 @@
 # Architecture and quality implementation — 21 October 2026
 
+This is a historical implementation checkpoint. See the newer
+[coverage progress report](coverage-progress.md) for current counters, added
+regression tests and outstanding platform verification, and
+[UI/UX implementation](ui-ux-implementation.md) for the subsequent UI changes.
+
 No staging, commit or push was performed by this agent. An initial commit
 `c0849c1` appeared in the shared checkout during verification; it was not created
 by this agent and has been left untouched. The latest workflow, coverage-policy

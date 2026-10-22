@@ -93,3 +93,7 @@ pub fn search(
     }
     (hits, false)
 }
+
+#[cfg(test)]
+#[path = "debug_model_tests.rs"]
+mod tests;

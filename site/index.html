@@ -47,6 +47,11 @@
       z-index: 0;
     }
 
+    html { scroll-padding-top: 112px; }
+    :focus-visible { outline: 3px solid var(--accent-light); outline-offset: 4px; }
+    .mobile-menu { display: none; }
+    .copy-status { color: var(--text-muted); font-size: .85rem; min-height: 1.6em; }
+
     .container {
       max-width: 1140px;
       margin: 0 auto;
@@ -137,9 +142,8 @@
       font-weight: 800;
       letter-spacing: -0.03em;
       margin-bottom: 20px;
-      background: linear-gradient(135deg, #ffffff 40%, #6ee7b7 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: var(--text);
+      background: none;
     }
     .hero p {
       font-size: 1.25rem;
@@ -266,7 +270,7 @@
     }
     .features-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
       gap: 24px;
       margin-bottom: 96px;
     }
@@ -361,6 +365,17 @@
     @media (max-width: 768px) {
       .hero h1 { font-size: 2.5rem; }
       .nav-links { display: none; }
+      .mobile-menu { display: block; position: relative; }
+      .mobile-menu summary { cursor: pointer; padding: 8px; }
+      .mobile-menu nav { position: absolute; right: 0; top: 100%; width: 200px; padding: 12px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 10px; }
+      .mobile-menu a { display: block; color: var(--text); padding: 10px; }
+      .brand { gap: 6px; }
+      .badge { font-size: .65rem; }
+      .hero { padding-top: 48px; }
+      .download-grid a { width: 100%; justify-content: center; text-align: center; }
+      .card { min-width: 0; }
+      .terminal-title { max-width: 45%; }
+      html { scroll-padding-top: 104px; }
     }
   </style>
 </head>
@@ -374,13 +389,21 @@
         <span>Lotse</span>
         <span class="badge">v0.1.0-alpha.1</span>
       </a>
+      <details class="mobile-menu">
+        <summary>Menu</summary>
+        <nav aria-label="Mobile navigation">
+          <a href="#downloads">Downloads</a><a href="#features">Features</a>
+          <a href="#docker">Docker</a><a href="#disclaimer">Alpha notice</a>
+          <a href="https://github.com/wulfnb/lotse">GitHub repository</a>
+        </nav>
+      </details>
       <div class="nav-links">
         <a href="#motivation">Why Lotse?</a>
         <a href="#features">Features</a>
         <a href="#docker">Docker</a>
         <a href="#downloads">Downloads</a>
         <a href="#disclaimer">Legal</a>
-        <a href="https://github.com/noufalbabu/lotse" class="btn-github" target="_blank" rel="noopener">
+        <a href="https://github.com/wulfnb/lotse" class="btn-github" target="_blank" rel="noopener">
           <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           GitHub
         </a>
@@ -395,30 +418,38 @@
         Lotse is an independent desktop browser engineered in Germany that embeds the open-source <strong>Servo 0.7.0</strong> engine. Built with movable tabs, AppKit vibrancy, and zero unsafe code in its core.
       </p>
 
-      <div class="download-grid" id="downloads">
-        <a href="https://github.com/noufalbabu/lotse/releases/latest" class="btn-primary" target="_blank" rel="noopener">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download Alpha Preview
+      <div class="download-grid" id="downloads" aria-label="Download Lotse Alpha Preview">
+        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg" class="btn-primary">
+          Download for macOS · Apple Silicon
         </a>
-        <a href="#docker" class="btn-secondary">
-          Run in Docker
+        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip" class="btn-primary">
+          Download for Windows · x64
         </a>
+        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz" class="btn-primary">
+          Download for Linux · x86_64
+        </a>
+        <a href="#docker" class="btn-secondary">Run in Docker</a>
+        <a href="https://github.com/wulfnb/lotse/releases" class="btn-secondary" target="_blank" rel="noopener">All releases &amp; checksums</a>
       </div>
 
+      <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
       <div class="terminal" id="docker">
         <div class="terminal-bar">
           <div class="terminal-dots">
             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           </div>
           <span class="terminal-title">Quick Launch via Docker</span>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText('docker run -d -p 7443:7443 -e SERVO_WEB_PASSWORD=\'choose-a-strong-password\' ghcr.io/noufalbabu/lotse:latest'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy', 2000)">Copy</button>
+          <button class="copy-btn" id="copy-docker" type="button">Copy</button>
         </div>
-        <div class="terminal-body">
+        <div class="terminal-body" id="docker-command" tabindex="0" aria-label="Docker launch command">
           <span class="cmd">docker run</span> -d \<br>
+          &nbsp;&nbsp;--name lotse-browser \<br>
           &nbsp;&nbsp;-p 7443:7443 \<br>
-          &nbsp;&nbsp;-e SERVO_WEB_PASSWORD=<span style="color: #f59e0b;">'choose-a-strong-password'</span> \<br>
-          &nbsp;&nbsp;ghcr.io/noufalbabu/lotse:latest<br><br>
-          <span style="color: #64748b;"># Open https://localhost:7443 in your browser to sign in.</span>
+          &nbsp;&nbsp;-e BROWSER_USER=servo \<br>
+          &nbsp;&nbsp;-e BROWSER_PASSWORD=<span style="color: #f59e0b;">'choose-a-strong-password'</span> \<br>
+          &nbsp;&nbsp;-v lotse-profile:/config \<br>
+          &nbsp;&nbsp;ghcr.io/wulfnb/lotse:latest<br><br>
+          <span style="color: #64748b;"># Open https://localhost:7443 and sign in as servo with your chosen password.</span>
         </div>
       </div>
     </section>
@@ -521,27 +552,28 @@
         <div class="footer-col">
           <h5>Downloads</h5>
           <ul>
-            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">macOS (Apple Silicon .dmg)</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">Linux (x86_64 .tar.gz)</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/releases/latest" target="_blank" rel="noopener">Windows (x64 .zip)</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/pkgs/container/lotse" target="_blank" rel="noopener">Docker Image (GHCR)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg" target="_blank" rel="noopener">macOS (Apple Silicon .dmg)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz" target="_blank" rel="noopener">Linux (x86_64 .tar.gz)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip" target="_blank" rel="noopener">Windows (x64 .zip)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/pkgs/container/lotse" target="_blank" rel="noopener">Docker Image (GHCR)</a></li>
           </ul>
         </div>
         <div class="footer-col">
           <h5>Architecture & Docs</h5>
           <ul>
-            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture Specification</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/architecture-decisions.md" target="_blank" rel="noopener">Decision Records (ADR)</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/blob/main/docs/docker.md" target="_blank" rel="noopener">Docker Viewer Guide</a></li>
-            <li><a href="https://github.com/noufalbabu/lotse/blob/main/LICENSE" target="_blank" rel="noopener">License (MPL-2.0)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture Specification</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/architecture-decisions.md" target="_blank" rel="noopener">Decision Records (ADR)</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/docker.md" target="_blank" rel="noopener">Docker Viewer Guide</a></li>
+            <li><a href="https://github.com/wulfnb/lotse/blob/main/LICENSE" target="_blank" rel="noopener">License (MPL-2.0)</a></li>
           </ul>
         </div>
       </div>
       <div class="copyright">
-        &copy; 2026 Lotse Browser Project. Released under the <a href="https://github.com/noufalbabu/lotse/blob/main/LICENSE" style="color: var(--accent-light); text-decoration: none;">Mozilla Public License 2.0</a>.
+        &copy; 2026 Lotse Browser Project. Released under the <a href="https://github.com/wulfnb/lotse/blob/main/LICENSE" style="color: var(--accent-light); text-decoration: none;">Mozilla Public License 2.0</a>.
       </div>
     </div>
   </footer>
+<script src="site.js" defer></script>
 </body>
 </html>
 

@@ -13,8 +13,9 @@ function connect() {
   screen.replaceChildren();
   const client = new RFB(screen, `wss://${location.host}/websockify`, {shared: true});
   rfb = client;
-  client.scaleViewport = true;
-  client.resizeSession = false;
+  const mode = document.querySelector('#viewport-mode').value;
+  client.scaleViewport = mode !== 'actual';
+  client.resizeSession = mode === 'resize';
   client.qualityLevel = 6;
   client.compressionLevel = 2;
   client.addEventListener('connect', () => {
@@ -138,3 +139,38 @@ document.querySelector('#signout').addEventListener('click', async () => {
     location.replace('/login.html');
   } catch (error) { status.textContent = error.message; }
 });
+
+const viewportMode = document.querySelector('#viewport-mode');
+viewportMode.addEventListener('change', () => {
+  screen.classList.toggle('actual-size', viewportMode.value === 'actual');
+  rfb.scaleViewport = viewportMode.value !== 'actual';
+  rfb.resizeSession = viewportMode.value === 'resize';
+  status.textContent = viewportMode.value === 'actual' ? 'Actual size: scroll to pan the desktop' : viewportMode.value === 'resize' ? 'Remote resize requested; use Fit if unsupported' : 'Fit to window';
+});
+const uploadDialog = document.querySelector('#upload-dialog');
+const uploadForm = document.querySelector('#upload-form');
+const uploadNotice = document.querySelector('#upload-notice');
+const uploadPath = document.querySelector('#upload-path');
+let uploadCsrf = '';
+document.querySelector('#upload').addEventListener('click', async () => {
+  rfb?.blur(); uploadForm.reset(); uploadPath.value = ''; uploadNotice.textContent = 'Loading…'; uploadDialog.showModal();
+  try { uploadCsrf = (await loadAccount()).csrf; uploadNotice.textContent = ''; }
+  catch (error) { uploadNotice.textContent = error.message; }
+});
+uploadForm.addEventListener('submit', async event => {
+  event.preventDefault();
+  const file = document.querySelector('#upload-file').files[0];
+  if (!file || file.size > 32 * 1024 * 1024) { uploadNotice.textContent = 'Choose a file of 32 MiB or smaller.'; return; }
+  const button = uploadForm.querySelector('button[type="submit"]'); button.disabled = true;
+  uploadNotice.textContent = 'Uploading…'; uploadPath.value = '';
+  try {
+    const response = await fetch('/auth/upload', {method:'POST', headers:{'Content-Type':'application/octet-stream', 'X-CSRF-Token':uploadCsrf, 'X-Upload-Name':encodeURIComponent(file.name)}, body:file});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Upload failed.');
+    uploadPath.value = result.path; uploadPath.focus(); uploadPath.select();
+    uploadNotice.textContent = 'Uploaded. Copy this remote path into the website file chooser.';
+  } catch (error) { uploadNotice.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+document.querySelector('#close-upload').addEventListener('click', () => uploadDialog.close());
+uploadDialog.addEventListener('close', () => { uploadForm.reset(); uploadCsrf = ''; rfb?.focus(); });

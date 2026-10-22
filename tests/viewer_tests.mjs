@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {fileURLToPath} from 'node:url';
 const filename = fileURLToPath(new URL('../docker/viewer/viewer.js', import.meta.url));
 class Element {
-  constructor() { this.listeners = new Map(); this.value = ''; this.children = []; this.hidden = false; this.passwords = [{value: 'secret'}]; this.elements = {username: {value: ''}}; }
+  constructor() { this.listeners = new Map(); this.value = ''; this.children = []; this.hidden = false; this.passwords = [{value: 'secret'}]; this.elements = {username: {value: ''}}; this.files = []; this.classList = {toggle: (name, value) => {this[name] = value;}}; }
   addEventListener(event, callback) { this.listeners.set(event, callback); }
   async fire(event, detail = {}) { await this.listeners.get(event)?.({preventDefault() {}, detail}); await new Promise(setImmediate); }
   replaceChildren() { this.children = []; }
@@ -14,6 +14,8 @@ class Element {
   close() { this.open = false; this.listeners.get('close')?.(); }
   querySelector() { return this.button ||= {disabled: false}; }
   querySelectorAll() { return this.passwords; }
+  focus() {this.focused = true;}
+  select() {this.selected = true;}
   reset() { this.resets = (this.resets || 0) + 1; }
 }
 async function fixture() {
@@ -110,4 +112,43 @@ test('bridge disconnect during credential rotation does not redirect or check ol
   f.replies.push(async () => { await f.clients[0].fire('disconnect'); return ok({}); });
   await f.get('#account-form').fire('submit');
   assert.equal(f.calls.length, 1); assert.deepEqual(f.locations, []);
+});
+
+
+test('viewport modes allow actual-size panning and explicit remote resizing', async () => {
+  const f = await fixture();
+  const mode = f.get('#viewport-mode');
+  for (const value of ['actual', 'resize', 'fit']) {
+    mode.value = value; await mode.fire('change');
+    assert.equal(f.clients[0].scaleViewport, value !== 'actual');
+    assert.equal(f.clients[0].resizeSession, value === 'resize');
+    assert.equal(f.get('#screen')['actual-size'], value === 'actual');
+  }
+});
+
+test('uploads are bounded, authenticated and return a selectable remote path', async () => {
+  const f = await fixture();
+  f.replies.push(ok({csrf:'upload-token'})); await f.get('#upload').fire('click');
+  assert.equal(f.get('#upload-dialog').open, true);
+  await f.get('#upload-form').fire('submit');
+  assert.match(f.get('#upload-notice').textContent, /Choose a file/);
+  f.get('#upload-file').files = [{name:'large', size:33*1024*1024}];
+  await f.get('#upload-form').fire('submit'); assert.equal(f.calls.length, 1);
+  f.get('#upload-file').files = [{name:'a b.txt', size:4}];
+  f.replies.push(ok({path:'/config/auth/uploads/file-123/a b.txt'}));
+  await f.get('#upload-form').fire('submit');
+  assert.equal(f.calls[1][0], '/auth/upload');
+  assert.equal(f.calls[1][1].headers['X-CSRF-Token'], 'upload-token');
+  assert.equal(f.calls[1][1].headers['X-Upload-Name'], 'a%20b.txt');
+  assert.equal(f.get('#upload-path').selected, true);
+  assert.match(f.get('#upload-notice').textContent, /Uploaded/);
+  f.replies.push({ok:false,json:async()=>({error:'Storage full'})});
+  await f.get('#upload-form').fire('submit'); assert.equal(f.get('#upload-notice').textContent, 'Storage full');
+  f.replies.push({ok:false,json:async()=>({})});
+  await f.get('#upload-form').fire('submit'); assert.equal(f.get('#upload-notice').textContent, 'Upload failed.');
+  f.replies.push(new Error('offline')); await f.get('#upload-form').fire('submit');
+  assert.equal(f.get('#upload-notice').textContent, 'offline');
+  await f.get('#close-upload').fire('click'); assert.equal(f.clients[0].focused, true);
+  f.replies.push(new Error('offline')); await f.get('#upload').fire('click');
+  assert.equal(f.get('#upload-notice').textContent, 'offline');
 });

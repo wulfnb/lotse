@@ -23,6 +23,29 @@ check = load('check-coverage')
 accounting = load('coverage-inventory')
 desktop = load('desktop-coverage')
 
+class PortableWrapperTests(unittest.TestCase):
+    def test_wrapper_preserves_arguments_flags_and_compiler_exit_status(self):
+        import os
+        import shutil
+        import subprocess
+        if not shutil.which('rustc'):
+            self.skipTest('Rust toolchain is required for compiler-wrapper contracts')
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / ('wrapper.exe' if os.name == 'nt' else 'wrapper')
+            subprocess.run(['rustc', str(ROOT / 'scripts/coverage-rustc.rs'), '--edition=2024', '-o', str(wrapper)], check=True)
+            for branch in ['0','1']:
+                env = dict(os.environ, LOTSE_COVERAGE_BRANCH=branch)
+                output = subprocess.check_output([str(wrapper), sys.executable, '-c', 'import json,sys; print(json.dumps(sys.argv[1:]))', 'literal argument with spaces', '$not_a_shell'], env=env, text=True)
+                args = json.loads(output)
+                self.assertEqual(args[:2], ['literal argument with spaces', '$not_a_shell'])
+                self.assertIn('instrument-coverage', args)
+                self.assertEqual('coverage-options=branch' in args, branch == '1')
+                if sys.platform == 'darwin':
+                    self.assertTrue(any('__llvm_prf_cnts,0x4000' in arg for arg in args))
+            self.assertEqual(subprocess.run([str(wrapper), sys.executable, '-c', 'import sys;sys.exit(17)']).returncode,17)
+            self.assertNotEqual(subprocess.run([str(wrapper)], capture_output=True).returncode,0)
+            self.assertNotEqual(subprocess.run([str(wrapper), str(Path(directory)/'missing')], capture_output=True).returncode,0)
+
 class DesktopVerificationTests(unittest.TestCase):
     def test_failed_native_suite_remains_a_failure_after_coverage_export(self):
         measurement = {'tests_passed': False, 'failures': ['native smoke (exit 101)', 'native logs: /test/run']}
@@ -87,6 +110,25 @@ class CoverageGateTests(unittest.TestCase):
             self.assertFalse(accounting.inventory(root, policy, [(rust, {'platform': 'host: other'})], {})['complete'])
             (root / 'src/brand.rs').write_text('fn now_executable() {}')
             self.assertFalse(accounting.inventory(root, policy, [(rust, {'platform': 'host: test'})], {})['complete'])
+
+    def test_shell_counters_require_passing_contracts_and_matching_sources(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'start.sh'
+            path.write_text('echo startup\n')
+            policy = {'include': ['*.sh'], 'test_only': [], 'declaration_only': [], 'required_builds': [], 'target_line_percent': 100}
+            shell = {'files': {'start.sh': {'lines': {'count': 1, 'covered': 1}, 'uncovered_lines': []}}, 'metadata': {'tests_passed': True, 'source_hashes': {'start.sh': hashlib.sha256(path.read_bytes()).hexdigest()}}}
+            self.assertTrue(accounting.inventory(root, policy, [], {}, shell=shell)['complete'])
+            shell['metadata']['tests_passed'] = False
+            self.assertFalse(accounting.inventory(root, policy, [], {}, shell=shell)['complete'])
+            shell['metadata']['tests_passed'] = True
+            path.write_text('echo changed\n')
+            stale = accounting.inventory(root, policy, [], {}, shell=shell)
+            self.assertFalse(stale['complete'])
+            self.assertEqual(stale['files'][0]['measurements'], [])
+            shell['metadata']['source_hashes'].clear()
+            self.assertFalse(accounting.inventory(root, policy, [], {}, shell=shell)['complete'])
 
     def test_empty_platform_report_never_satisfies_a_required_build(self):
         with tempfile.TemporaryDirectory() as directory:

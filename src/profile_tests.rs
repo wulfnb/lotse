@@ -169,3 +169,9 @@ fn history_grouping_handles_yesterday_older_and_invalid_timestamps() {
         ("Earlier visits".into(), String::new())
     );
 }
+
+#[test]
+fn malformed_host_ports_are_rejected_before_navigation() {
+    assert!(resolve_address("localhost:bad").is_err());
+    assert!(resolve_address("example.com:bad").is_err());
+}

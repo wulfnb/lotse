@@ -11,6 +11,9 @@ struct Server {
 }
 impl Server {
     fn new(ignore_range: bool, slow: bool) -> Self {
+        Self::with_range_fault(ignore_range, slow, 0)
+    }
+    fn with_range_fault(ignore_range: bool, slow: bool, fault: u8) -> Self {
         let socket = TcpListener::bind("127.0.0.1:0").unwrap();
         socket.set_nonblocking(true).unwrap();
         let url = format!("http://{}/archive.bin", socket.local_addr().unwrap());
@@ -42,8 +45,9 @@ impl Server {
             let text=String::from_utf8_lossy(&request);let head=text.starts_with("HEAD ");
             let range=text.lines().find_map(|s|s.to_ascii_lowercase().strip_prefix("range: bytes=").map(str::to_owned)).and_then(|r|r.split_once('-').and_then(|(a,b)|Some((a.parse::<usize>().ok()?,b.parse::<usize>().ok()?))));
             let (start,end,status)=if !ignore_range&&let Some((a,b))=range{count.fetch_add(1,Ordering::Relaxed);(a,b,"206 Partial Content")}else{(0,data.len()-1,"200 OK")};
-            let extra=if status.starts_with("206"){format!("Content-Range: bytes {start}-{end}/{}\r\n",data.len())}else{String::new()};
-            let header=format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nETag: \"stable-v1\"\r\nContent-Disposition: attachment; filename=archive.bin\r\n{extra}Connection: close\r\n\r\n",end-start+1);
+            let extra=if status.starts_with("206"){format!("Content-Range: bytes {}-{end}/{}\r\n",if fault == 1 {start + 1} else {start},data.len())}else{String::new()};
+            let etag = if status.starts_with("206") && fault == 2 { "changed-v2" } else { "stable-v1" };
+            let header=format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\nETag: \"{etag}\"\r\nContent-Disposition: attachment; filename=archive.bin\r\n{extra}Connection: close\r\n\r\n",end-start+1);
             if stream.write_all(header.as_bytes()).is_err()||head{return}
             let n=active.fetch_add(1,Ordering::Relaxed)+1;maximum.fetch_max(n,Ordering::Relaxed);
             thread::sleep(Duration::from_millis(80));
@@ -357,4 +361,113 @@ fn application_download_port_uses_the_real_service_validation() {
         DownloadPort::start(&mut manager, "file:///private", "file", 1, String::new()).is_err()
     );
     assert!(manager.jobs().is_empty());
+}
+
+#[test]
+fn invalid_ranges_and_changed_validators_fall_back_to_verified_single_transfer() {
+    for fault in [1, 2] {
+        let server = Server::with_range_fault(false, false, fault);
+        let (mut manager, root) = manager();
+        manager
+            .start(&server.url, "fault.bin", 3, String::new())
+            .unwrap();
+        let progress = finished(&manager.jobs()[0]);
+        assert_eq!(progress.phase, Phase::Complete, "{}", progress.message);
+        assert_eq!(
+            progress.connections, 1,
+            "Invalid range metadata must disable multipart"
+        );
+        assert_eq!(fs::read(progress.path.unwrap()).unwrap(), *server.body);
+        assert!(server.ranges.load(Ordering::Relaxed) > 0);
+        drop(manager);
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+fn stored_job(phase: Phase) -> Arc<Job> {
+    Arc::new(Job {
+        url: "http://127.0.0.1/retained.bin".into(),
+        progress: Mutex::new(Progress {
+            phase,
+            filename: "retained.bin".into(),
+            total: None,
+            connections: 1,
+            message: String::new(),
+            path: None,
+        }),
+        command: AtomicU8::new(RUN),
+        completed: AtomicU64::new(0),
+        inflight: (0..8).map(|_| AtomicU64::new(0)).collect(),
+        started: Instant::now(),
+    })
+}
+
+#[test]
+fn download_history_capacity_preserves_in_progress_and_paused_jobs() {
+    let (mut manager, _) = manager();
+    for phase in [
+        Phase::Connecting,
+        Phase::Downloading,
+        Phase::Paused,
+        Phase::Complete,
+        Phase::Failed,
+        Phase::Cancelled,
+    ] {
+        manager.items.push(Item {
+            job: stored_job(phase),
+            worker: None,
+        });
+    }
+    manager.clear_finished();
+    assert_eq!(
+        manager
+            .jobs()
+            .iter()
+            .map(|j| j.progress.lock().unwrap().phase.clone())
+            .collect::<Vec<_>>(),
+        vec![Phase::Connecting, Phase::Downloading, Phase::Paused]
+    );
+    manager.items.clear();
+    for _ in 0..64 {
+        manager.items.push(Item {
+            job: stored_job(Phase::Complete),
+            worker: None,
+        });
+    }
+    assert!(
+        manager
+            .start("http://127.0.0.1/file.bin", "", 1, String::new())
+            .unwrap_err()
+            .contains("Clear finished")
+    );
+    manager.clear_finished();
+    assert!(manager.jobs().is_empty());
+}
+
+#[test]
+fn multipart_reuses_complete_segments_and_bounds_work_before_launching_workers() {
+    let (_, root) = manager();
+    fs::create_dir_all(&root).unwrap();
+    let job = stored_job(Phase::Paused);
+    let mut meta = Meta::default();
+    meta.headers
+        .insert("content-length".into(), (SEGMENT * 100_001).to_string());
+    assert!(
+        parallel(&job, &root, &meta, 8)
+            .unwrap_err()
+            .contains("Too many")
+    );
+    meta.headers.insert("content-length".into(), "4".into());
+    meta.headers.insert("etag".into(), "\"stable\"".into());
+    fs::write(root.join("part-000000"), b"data").unwrap();
+    let path = parallel(&job, &root, &meta, 2).unwrap();
+    assert_eq!(fs::read(path).unwrap(), b"data");
+    assert_eq!(job.bytes(), 4);
+    job.cancel();
+    assert!(
+        parallel(&job, &root, &meta, 2)
+            .unwrap_err()
+            .contains("Interrupted")
+    );
+    fs::remove_dir_all(root).unwrap();
 }

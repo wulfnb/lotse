@@ -40,7 +40,12 @@ impl Browser {
             return;
         }
         let colors = crate::theme::palette(ui.ctx());
-        let (panel, size, maximum) = match self.profile().devtools_dock {
+        let dock = if crate::ux::compact(ui.ctx().content_rect().width()) {
+            Dock::Bottom
+        } else {
+            self.profile().devtools_dock
+        };
+        let (panel, size, maximum) = match dock {
             Dock::Left => (
                 egui::Panel::left("tools-left"),
                 560.0,
@@ -116,6 +121,11 @@ impl Browser {
                     self.close_developer_tools();
                 }
                 ui.menu_button("…", |ui| {
+                    if ui.button("Rendering diagnostics…").clicked() {
+                        self.features.diagnostics = true;
+                        ui.close();
+                    }
+
                     for (dock, label) in crate::tool_window::Dock::ALL {
                         if ui
                             .selectable_label(self.profile().devtools_dock == dock, label)
@@ -615,10 +625,12 @@ impl Browser {
                 )
             })
             .collect();
+        let summary_galley = ui.painter().layout(summary.clone(), egui::TextStyle::Small.resolve(ui.style()), colors.muted, ui.available_width());
+        let footer_height = summary_galley.size().y + ui.spacing().item_spacing.y + ui.spacing().scroll.bar_width + 8.0;
         let mut resized = None;
         egui::ScrollArea::both()
             .id_salt("network-table")
-            .max_height((ui.available_height() - 28.0).max(30.0))
+            .max_height((ui.available_height() - footer_height).max(0.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let (header, _) =

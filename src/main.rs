@@ -11,6 +11,8 @@ mod compat;
 mod console_model;
 mod console_ui;
 mod cookie_inspector;
+#[cfg(feature = "test-harness")]
+mod coverage_ui_tests;
 mod debug_driver;
 mod debug_model;
 mod debugger_ui;
@@ -31,6 +33,7 @@ mod network_controls;
 mod performance_ui;
 mod probes;
 use servo_browser::profile;
+mod accessibility;
 mod resources;
 #[cfg(feature = "test-harness")]
 mod smoke;
@@ -42,6 +45,7 @@ mod toolbox;
 #[cfg(feature = "test-harness")]
 mod toolbox_test;
 mod ui;
+mod ux;
 
 fn browser_icon() -> Option<winit::window::Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/icons/browser-icon-256.png"))
@@ -81,6 +85,7 @@ impl ApplicationHandler<Wake> for App {
         let result = event_loop
             .create_window(
                 Window::default_attributes()
+                    .with_visible(false)
                     .with_title(crate::brand::APP_NAME)
                     .with_window_icon(browser_icon())
                     .with_transparent(cfg!(target_os = "macos"))
@@ -104,6 +109,7 @@ impl ApplicationHandler<Wake> for App {
             match &event {
                 Wake::Media(action) => browser.media_action(Some(action.clone())),
                 Wake::ToggleMedia => browser.media_action(None),
+                Wake::Accessibility(event) => browser.accessibility_event(event),
                 _ => {}
             }
             if matches!(event, Wake::Servo) {

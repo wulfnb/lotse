@@ -14,4 +14,5 @@ window.advancedLogs = function advancedLogs() {
   console.error('advanced-error');
   console.trace('advanced-trace');
   console.log('advanced-numbers', NaN, Infinity, undefined, null);
+  console.log('preview-types', false, -0, new Map([[Infinity,-Infinity]]), { nested: new Set([NaN]) });
 };

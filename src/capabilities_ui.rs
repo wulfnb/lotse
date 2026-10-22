@@ -5,7 +5,25 @@ use crate::{
 impl Browser {
     pub fn update_documents(&self) {
         let mut docs = self.documents.write().unwrap();
-        docs.insert("newtab".into(), capabilities::document("Welcome to Lotse", "<p>Lotse is your native Rust browser, powered by Servo.</p><p><a href='https://www.google.com/'>Search the web</a></p>"));
+        let palette = self.profile().theme.palette(
+            self.window.theme() != Some(winit::window::Theme::Light),
+            false,
+        );
+        let document = |title: &str, body: &str| capabilities::document(title, body, palette);
+        let shortcuts = self
+            .profile()
+            .bookmarks
+            .iter()
+            .take(8)
+            .map(|b| {
+                format!(
+                    "<li><a href='{}'>{}</a></li>",
+                    capabilities::html(&b.url),
+                    capabilities::html(&b.title)
+                )
+            })
+            .collect::<String>();
+        docs.insert("newtab".into(), document("Welcome to Lotse", &format!("<p>Search here or press <b>Cmd/Ctrl+L</b> to enter an address.</p><form action='https://www.google.com/search' method='get'><label for='search'>Search the web</label><p class='search-controls'><input id='search' name='q' type='search' placeholder='Search Google' required><button type='submit'>Search</button></p></form><h2>Saved pages</h2><ul>{shortcuts}</ul><p><a href='lotse://history'>Browse recent pages</a></p>")));
         for (name, title, items) in [
             ("history", "History", &self.profile().history),
             ("bookmarks", "Bookmarks", &self.profile().bookmarks),
@@ -20,12 +38,9 @@ impl Browser {
                     )
                 })
                 .collect::<String>();
-            docs.insert(
-                name.into(),
-                capabilities::document(title, &format!("<ul>{list}</ul>")),
-            );
+            docs.insert(name.into(), document(title, &format!("<ul>{list}</ul>")));
         }
-        docs.insert("settings".into(),capabilities::document("Browser settings","<p>Open <b>… → Browser settings</b> to manage host rules, offline mode, scripts and site data.</p><p>Internal documents have no access to native browser controls.</p>"));
+        docs.insert("settings".into(),document("Browser settings","<p>Use the Browser settings window to manage appearance, browsing, privacy, downloads and advanced options. If it is closed, reopen it from <b>… → Browser settings</b>.</p><p>Internal documents have no access to native browser controls.</p>"));
     }
     pub fn screenshot_page(&mut self) {
         let folder = self.profile_dir.join("screenshots");
@@ -41,17 +56,30 @@ impl Browser {
                 .as_nanos()
         ));
         let events = self.delegate.clone();
-        self.tab().view.take_screenshot(None, move |result| {
-            let message = match result {
+        self.tab()
+            .view
+            .take_screenshot(None, move |result| match result {
                 Ok(image) => match image.save(&path) {
-                    Ok(()) => format!("Saved screenshot: {}", path.display()),
-                    Err(e) => e.to_string(),
+                    Ok(()) => events.notice(
+                        crate::ux::Severity::Success,
+                        format!("Saved screenshot: {}", path.display()),
+                        Some(path),
+                    ),
+                    Err(error) => {
+                        events.notice(crate::ux::Severity::Error, error.to_string(), None)
+                    }
                 },
-                Err(e) => format!("Screenshot failed: {e:?}"),
-            };
-            events.report(message);
-        });
-        self.status = Some("Waiting for the page screenshot…".into());
+                Err(error) => events.notice(
+                    crate::ux::Severity::Error,
+                    format!("Screenshot failed: {error:?}"),
+                    None,
+                ),
+            });
+        self.notify(
+            crate::ux::Severity::Info,
+            "Waiting for the page screenshot…",
+            None,
+        );
     }
     pub fn reload_without_cache(&mut self) {
         if let Some(url) = self.tab().view.url() {
@@ -103,14 +131,24 @@ impl Browser {
             .unwrap_or_default();
     }
     pub fn feature_ui(&mut self, ctx: &egui::Context) {
-        if let Some(prompt) = self.features.prompts.front() {
-            let mut answer = None;
+        if !self.features.prompts.is_empty() {
+            let fresh = self.prepare_dialog(ctx, "engine-confirmation");
+            let mut answer = if crate::ux::escape(ctx) {
+                Some(false)
+            } else {
+                None
+            };
+            let prompt = self.features.prompts.front().unwrap();
             egui::Modal::new(egui::Id::unique("engine-confirmation")).show(ctx, |ui| {
                 ui.set_max_width(480.0);
                 ui.heading(&prompt.title);
                 ui.label(&prompt.detail);
                 ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
+                    let cancel_button = ui.button("Cancel");
+                    if fresh {
+                        cancel_button.request_focus();
+                    }
+                    if cancel_button.clicked() {
                         answer = Some(false);
                     }
                     if ui.button("Continue").clicked() {
@@ -120,6 +158,7 @@ impl Browser {
             });
             if let Some(allow) = answer {
                 let prompt = self.features.prompts.pop_front().unwrap();
+                self.finish_dialog(ctx);
                 match prompt.decision {
                     Decision::Servo(request) => {
                         if allow {
@@ -171,10 +210,11 @@ impl Browser {
             }
             return;
         }
-        if let Some(request) = self.features.bluetooth.front() {
-            let devices = request.devices().clone();
+        if !self.features.bluetooth.is_empty() {
+            let fresh = self.prepare_dialog(ctx, "bluetooth");
+            let devices = self.features.bluetooth.front().unwrap().devices().clone();
             let mut selected = None;
-            let mut cancel = false;
+            let mut cancel = crate::ux::escape(ctx);
             egui::Modal::new(egui::Id::unique("bluetooth-device")).show(ctx, |ui| {
                 ui.heading("Choose a Bluetooth device");
                 if devices.is_empty() {
@@ -188,7 +228,11 @@ impl Browser {
                         selected = Some(i);
                     }
                 }
-                cancel = ui.button("Cancel").clicked();
+                let button = ui.button("Cancel");
+                if fresh {
+                    button.request_focus();
+                }
+                cancel |= button.clicked();
             });
             if let Some(i) = selected {
                 let _ = self
@@ -204,11 +248,29 @@ impl Browser {
         }
         if self.features.settings {
             let mut open = true;
-            egui::Window::new("Browser settings").open(&mut open).default_width(620.0)
-                .default_pos(egui::pos2(((ctx.content_rect().width()-620.0)/2.0).max(12.0),100.0))
-                .frame(egui::Frame::window(&ctx.style_of(if crate::theme::palette(ctx).dark {egui::Theme::Dark}else{egui::Theme::Light})).inner_margin(16)).show(ctx,|ui|{
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-200.0).max(250.0))
-                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui,|ui|{
+            egui::Window::new("Browser settings").open(&mut open)
+                .default_width(620.0).max_width((ctx.content_rect().width()-40.0).max(280.0))
+                .default_pos(egui::pos2(24.0,80.0)).show(ctx,|ui|{
+                ui.horizontal_wrapped(|ui|{
+                    for (i,label) in ["Appearance","Browsing","Privacy","Downloads","Advanced"].iter().enumerate() {
+                        ui.selectable_value(&mut self.features.settings_section,i,*label);
+                    }
+                });
+                ui.separator();
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-210.0).max(180.0)).show(ui,|ui|{
+                    match self.features.settings_section {
+                        0 => {
+                            ui.heading("Appearance");
+                            for theme in crate::theme::Theme::ALL {
+                                if ui.selectable_label(self.profile().theme==theme,theme.name()).clicked(){self.set_theme(ctx,theme);}
+                            }
+                            ui.weak("Auto follows your system appearance. Website colors are controlled by each website.");
+                            ui.horizontal(|ui|{
+                                if ui.button("Tabs on top").clicked(){self.apply(servo_browser::application::Command::Layout(crate::profile::TabLayout::Top));}
+                                if ui.button("Tabs in sidebar").clicked(){self.apply(servo_browser::application::Command::Layout(crate::profile::TabLayout::Side));}
+                            });
+                        }
+                        1 => {
                     ui.heading("Navigation and requests");
                     ui.label("Host rules match the exact host and its subdomains. Separate hosts with spaces or newlines.");
                     ui.label("Blocked hosts (also blocks subresources)");
@@ -219,28 +281,76 @@ impl Browser {
                     changed|=ui.checkbox(&mut policy.offline,"Offline mode — block HTTP/HTTPS requests").changed();
                     changed|=ui.checkbox(&mut policy.allow_window_changes,"Allow sites to move and resize this window").changed();
                     if changed { self.apply(servo_browser::application::Command::Policy(policy)); }
+
+                        }
+                        2 => {
+                    ui.separator();ui.heading("Browsing data");
+                    if ui.button("Review cookies and stored sites").clicked(){self.refresh_site_data();self.features.site_info=true;}
+                    if ui.button("Clear browsing data…").clicked(){self.features.clear_data=true;}
+                    if ui.button("Clear session cookies").clicked(){self.servo.site_data_manager().clear_session_cookies(None);self.notify(crate::ux::Severity::Success,"Session cookies cleared.",None);}
+
+                        }
+                        3 => {
+                            ui.heading("Downloads");
+                            ui.label(format!("Save folder: {}",self.downloads.directory.display()));
+                            if ui.button("Open download manager").clicked(){self.download_ui.open=true;}
+                            ui.weak("Open completed files or show them in their folder from Downloads. In Docker, use the viewer's Downloads button to save to your computer.");
+                        }
+                        _ => {
                     ui.separator(); ui.heading("User script");
                     ui.label("Runs in every subsequently loaded page. Changes apply after reload.");
                     ui.add(egui::TextEdit::multiline(&mut self.features.script_source).code_editor().desired_rows(7).desired_width(f32::INFINITY));
                     if ui.button("Apply script").clicked(){let mut policy=self.profile().policy.clone();policy.user_script=self.features.script_source.clone();self.apply(servo_browser::application::Command::Policy(policy));
                         if let Some(script)=self.features.script.take(){self.content_manager.remove_script(script);}
                         if !self.profile().policy.user_script.trim().is_empty(){let script=std::rc::Rc::new(servo::UserScript::new(self.profile().policy.user_script.clone(),None));self.content_manager.add_script(script.clone());self.features.script=Some(script);}
-                        self.changed();self.status=Some("User script saved. Reload a page to apply.".into());
+                        self.changed();self.notify(crate::ux::Severity::Success,"User script saved. Reload a page to apply.",None);
                     }
-                    ui.separator();ui.heading("Browsing data");
-                    if ui.button("Review cookies and stored sites").clicked(){self.refresh_site_data();self.features.site_info=true;}
-                    if ui.button("Clear browsing data…").clicked(){self.features.clear_data=true;}
-                    if ui.button("Clear session cookies").clicked(){self.servo.site_data_manager().clear_session_cookies(None);self.status=Some("Session cookies cleared.".into());}
-                    ui.separator();ui.heading("Media session");
-                    if let Some(event)=self.features.media.get(&self.tab().view.id()){ui.label(format!("{event:?}"));}
-                    ui.horizontal(|ui|{for (name,action) in [("Play",servo::MediaSessionActionType::Play),("Pause",servo::MediaSessionActionType::Pause),("Previous",servo::MediaSessionActionType::PreviousTrack),("Next",servo::MediaSessionActionType::NextTrack)]{if ui.button(name).clicked(){self.tab().view.notify_media_session_action_event(action);}}});
-                    ui.separator();ui.heading("Rendering diagnostics");
-                    ui.horizontal(|ui|{for (name,option) in [("Profiler",servo::WebRenderDebugOption::Profiler),("Texture cache",servo::WebRenderDebugOption::TextureCacheDebug),("Render targets",servo::WebRenderDebugOption::RenderTargetDebug)]{if ui.button(name).clicked(){self.tab().view.toggle_webrender_debugging(option);}}});
-                    if ui.button("Capture WebRender state").clicked(){self.tab().view.capture_webrender();self.status=Some("WebRender capture requested; see engine log for output location.".into());}
-                    if ui.button("Clear this tab’s back/forward history").clicked(){self.tab().view.clear_session_history();}
+
+                            if ui.button("Open developer diagnostics").clicked(){self.features.diagnostics=true;}
+                        }
+                    }
                 });
             });
             self.features.settings = open;
+        }
+        if self.features.diagnostics {
+            let mut open = true;
+            egui::Window::new("Developer rendering diagnostics")
+                .open(&mut open)
+                .default_width(520.0)
+                .show(ctx, |ui| {
+                    ui.separator();
+                    ui.heading("Rendering diagnostics");
+                    ui.horizontal(|ui| {
+                        for (name, option) in [
+                            ("Profiler", servo::WebRenderDebugOption::Profiler),
+                            (
+                                "Texture cache",
+                                servo::WebRenderDebugOption::TextureCacheDebug,
+                            ),
+                            (
+                                "Render targets",
+                                servo::WebRenderDebugOption::RenderTargetDebug,
+                            ),
+                        ] {
+                            if ui.button(name).clicked() {
+                                self.tab().view.toggle_webrender_debugging(option);
+                            }
+                        }
+                    });
+                    if ui.button("Capture WebRender state").clicked() {
+                        self.tab().view.capture_webrender();
+                        self.notify(
+                            crate::ux::Severity::Info,
+                            "WebRender capture requested; see engine log for output location.",
+                            None,
+                        );
+                    }
+                    if ui.button("Clear this tab’s back/forward history").clicked() {
+                        self.tab().view.clear_session_history();
+                    }
+                });
+            self.features.diagnostics = open;
         }
         if self.features.site_info {
             let mut open = true;
@@ -287,22 +397,40 @@ impl Browser {
                                 });
                             }
                             if let Some(site) = remove {
-                                self.servo
-                                    .site_data_manager()
-                                    .clear_site_data(&[&site], servo::StorageType::all());
-                                self.refresh_site_data();
+                                self.features.delete_site = Some(site);
                             }
                         });
                 });
             self.features.site_info = open;
         }
+        if let Some(site) = self.features.delete_site.clone() {
+            let fresh = self.prepare_dialog(ctx, "delete-site-data");
+            let cancel = crate::ux::escape(ctx);
+            egui::Modal::new(egui::Id::unique("delete-site-data")).show(ctx,|ui|{
+                ui.heading("Delete this site's data?");
+                ui.label(&site);
+                ui.label("Cookies and offline storage for this site will be removed. You may be signed out. This cannot be undone.");
+                ui.horizontal(|ui|{
+                    let button=ui.button("Cancel");if fresh {button.request_focus();}
+                    if button.clicked() || cancel {self.features.delete_site=None;}
+                    if ui.button(egui::RichText::new("Delete site data").color(crate::theme::palette(ctx).danger)).clicked(){
+                        self.servo.site_data_manager().clear_site_data(&[&site],servo::StorageType::all());
+                        self.features.delete_site=None;self.refresh_site_data();self.notify(crate::ux::Severity::Success,"Site data deleted.",None);
+                    }
+                });
+            });
+            return;
+        }
         if self.features.clear_data {
+            let fresh = self.prepare_dialog(ctx, "clear-data");
+            let cancel = crate::ux::escape(ctx);
             egui::Modal::new(egui::Id::unique("clear-data")).show(ctx,|ui|{
                 ui.heading("Clear browsing data?");ui.label("Deletes cookies, local/session storage, HTTP cache and browsing history. Open sites may sign you out. Bookmarks remain.");
-                ui.horizontal(|ui|{if ui.button("Cancel").clicked(){self.features.clear_data=false;}
+                ui.horizontal(|ui|{let button=ui.button("Cancel");if fresh {button.request_focus();}
+if button.clicked() || cancel {self.features.clear_data=false;}
                 if ui.button("Clear data").clicked(){
                     let sites=self.servo.site_data_manager().site_data(servo::StorageType::all());let names:Vec<_>=sites.iter().map(|s|s.name()).collect();let names:Vec<_>=names.iter().map(String::as_str).collect();
-                    self.servo.site_data_manager().clear_site_data(&names,servo::StorageType::all());self.servo.site_data_manager().clear_cookies(None);self.servo.network_manager().clear_cache();self.apply(servo_browser::application::Command::ClearHistory);self.features.cookies.clear();self.features.sites.clear();self.features.clear_data=false;self.changed();self.status=Some("Browsing data cleared.".into());
+                    self.servo.site_data_manager().clear_site_data(&names,servo::StorageType::all());self.servo.site_data_manager().clear_cookies(None);self.servo.network_manager().clear_cache();self.apply(servo_browser::application::Command::ClearHistory);self.features.cookies.clear();self.features.sites.clear();self.features.clear_data=false;self.changed();self.notify(crate::ux::Severity::Success,"Browsing data cleared.",None);
                 }});
             });
         }
@@ -326,7 +454,7 @@ impl Browser {
                                 let delegate = self.delegate.clone();
                                 self.tab().view.evaluate_javascript(source, move |result| {
                                     if let Ok(servo::JSValue::String(text)) = result {
-                                        delegate.report(text);
+                                        delegate.notice(crate::ux::Severity::Info, text, None);
                                     }
                                 });
                             }

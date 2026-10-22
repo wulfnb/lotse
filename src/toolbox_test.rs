@@ -1236,6 +1236,7 @@ impl Browser {
                     .exists()
             );
 
+            self.check_tool_ui_contracts();
             println!(
                 "TOOLBOX TEST PASSED: real HTTP requests, POST payload/response, headers, 404, redirect, waterfall layout, HAR binary round trip/import/filter/sort, composed POST, cURL, DOM tree, matched CSS, computed styles, box model, native element picking/cleanup, attribute editing and undo, left/right/bottom docking, split console, separate OS window close/reopen/redock, CSS source/edit/reset, script sources, debugger pause/resume and executable breakpoints, console evaluation, structured severities/source locations/object previews/stack traces/CSS/page errors, paused lexical scopes, watches, paused-frame evaluation, step shortcuts, breakpoint toggles, source search/ignore, await expressions and accessor-safe previews, performance recording/timeline/frame intervals, right-hand Network/Style Editor panes, opaque-origin storage handling, memory reports, storage edits, actual accessibility nodes, application manifest"
             );

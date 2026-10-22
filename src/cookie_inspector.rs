@@ -151,3 +151,7 @@ impl State {
         ui.weak("Cookie editing and IndexedDB inspection are not available yet.");
     }
 }
+
+#[cfg(test)]
+#[path = "cookie_inspector_tests.rs"]
+mod tests;
