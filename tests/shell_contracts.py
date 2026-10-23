@@ -116,7 +116,15 @@ def main():
         # directory modes and real self-signed TLS generation are checked.
         env = dict(base_env, BROWSER_RESOLUTION='1280x800', BROWSER_USER='fixture-user', BROWSER_PASSWORD='fixture-secret', BROWSER_PASSWORD_FILE='/tmp/fixture-password')
         Path('/config/auth').mkdir(parents=True, exist_ok=True)
+        # Reproduce the browser-owned, private tmpfs used by compose.quality.yaml.
+        Path('/config').chmod(0o700)
         run('docker/entrypoint.sh', env=env)
+        assert (Path('/config').stat().st_mode & 0o777) == 0o711
+        for private in ['auth', 'browser', 'Downloads', '.cache']:
+            assert (Path('/config', private).stat().st_mode & 0o777) == 0o700
+        subprocess.run(['/usr/sbin/gosu', 'wega-auth', '/bin/sh', '-c',
+                        'test -x /config && test -r /config/auth && '
+                        'test ! -r /config/browser && test ! -r /config/Downloads'], check=True)
         assert (Path('/config/tls/server.key').stat().st_mode & 0o777) == 0o600
         assert (Path('/run/wega/browser').stat().st_mode & 0o777) == 0o700
         run('docker/entrypoint.sh', ['/bin/sh', '-c', 'test -z "${BROWSER_USER+x}${BROWSER_PASSWORD+x}${BROWSER_PASSWORD_FILE+x}"'], env=env)

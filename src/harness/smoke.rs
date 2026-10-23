@@ -8,6 +8,21 @@ use winit::{
 };
 
 impl Browser {
+    fn assert_library_layout(&self) {
+        let screen = self.gui.as_ref().unwrap().egui_ctx.content_rect();
+        let library = self.chrome.library_rect;
+        let page = self.chrome.page_rect;
+        let valid = if crate::ux::compact(screen.width()) {
+            library.intersects(page) && screen.contains_rect(library)
+        } else {
+            (library.min.x - page.max.x - 16.0).abs() < 2.0
+        };
+        assert!(
+            valid,
+            "Library must overlay compact pages or have a 16-point gap on wide windows: screen={screen:?}, page={page:?}, library={library:?}"
+        );
+    }
+
     fn smoke_stage(&mut self, stage: u8) {
         let smoke = self.harness.smoke.as_mut().unwrap();
         smoke.stage = stage;
@@ -314,11 +329,7 @@ impl Browser {
             }
             9 if smoke.stage_at.elapsed() > Duration::from_millis(650) => {
                 assert!(self.chrome.library_rect.is_positive());
-                assert!(
-                    (self.chrome.library_rect.min.x - self.chrome.page_rect.max.x - 16.0).abs()
-                        < 2.0,
-                    "History card must have a 16-point gap beside the inset page"
-                );
+                self.assert_library_layout();
                 self.chrome.show_history = false;
                 self.chrome.show_bookmarks = true;
                 self.smoke_stage(10);
@@ -326,11 +337,7 @@ impl Browser {
             }
             10 if smoke.stage_at.elapsed() > Duration::from_millis(650) => {
                 assert!(self.chrome.library_rect.is_positive());
-                assert!(
-                    (self.chrome.library_rect.min.x - self.chrome.page_rect.max.x - 16.0).abs()
-                        < 2.0,
-                    "Bookmarks card must have a 16-point gap beside the inset page"
-                );
+                self.assert_library_layout();
                 println!(
                     "SMOKE TEST PASSED: Servo HTML/CSS/JS, native mouse routing, typing, scrolling, back/forward, popup tabs, top/side layouts, reorder, close, bookmarks, profile round-trip, console, toolbar reload, readable gradient text, unchanged regular gradients, aligned library panels, GPU pixels"
                 );

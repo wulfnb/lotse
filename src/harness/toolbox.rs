@@ -33,6 +33,23 @@ const PROBES: [Tool; 7] = [
     Tool::Application,
 ];
 impl Browser {
+    fn assert_toolbox_side_dock(&self, left: bool) {
+        let screen = self.gui.as_ref().unwrap().egui_ctx.content_rect();
+        let panel = self.tools.panel_rect;
+        let page = self.chrome.page_rect;
+        let valid = if crate::ux::compact(screen.width()) {
+            panel.min.y > page.max.y
+        } else if left {
+            panel.max.x < page.min.x
+        } else {
+            panel.min.x > page.max.x
+        };
+        assert!(
+            valid,
+            "Side dock must fall back to bottom on compact windows: left={left}, screen={screen:?}, page={page:?}, panel={panel:?}"
+        );
+    }
+
     fn advanced_location(&self, owner: &str) -> (u32, u32) {
         let source = self.tools.debug[owner]
             .sources
@@ -597,10 +614,7 @@ impl Browser {
             return;
         }
         if stage == 34 && elapsed > Duration::from_millis(700) {
-            assert!(
-                self.tools.panel_rect.min.x > self.chrome.page_rect.max.x,
-                "Right dock leaves page on left"
-            );
+            self.assert_toolbox_side_dock(false);
             assert!(self.chrome.page_rect.width() >= 180.0);
             self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Left,
@@ -612,10 +626,7 @@ impl Browser {
             return;
         }
         if stage == 35 && elapsed > Duration::from_millis(700) {
-            assert!(
-                self.tools.panel_rect.max.x < self.chrome.page_rect.min.x,
-                "Left dock leaves page on right"
-            );
+            self.assert_toolbox_side_dock(true);
             self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Bottom,
             ));
@@ -696,7 +707,7 @@ impl Browser {
         }
         if stage == 41 && elapsed > Duration::from_millis(700) && self.tool_window.is_none() {
             assert!(self.tool_window.is_none());
-            assert!(self.tools.panel_rect.max.x < self.chrome.page_rect.min.x);
+            self.assert_toolbox_side_dock(true);
             self.tools.refresh(&view, &self.servo);
             self.tool_stage(42);
             return;

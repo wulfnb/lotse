@@ -86,7 +86,10 @@ width=${BROWSER_RESOLUTION%x*}; height=${BROWSER_RESOLUTION#*x}
 }
 mkdir -p /config/browser /config/Downloads /config/.cache /config/uploads /run/wega/browser /run/wega/auth /run/wega/vnc
 chown browser:browser /config /config/browser /config/Downloads /config/.cache /run/wega/browser
-chmod 700 /run/wega/browser
+# The auth worker has its own UID and must traverse the shared parent even
+# when /config is mounted as a browser-owned 0700 tmpfs. Children stay private.
+chmod 711 /config
+chmod 700 /config/browser /config/Downloads /config/.cache /run/wega/browser
 # Xvfb (browser UID) cannot create its socket directory on a fresh /tmp tmpfs.
 mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 # Unix sockets replace loopback TCP: rfb.sock (x11vnc, browser UID) is reachable
