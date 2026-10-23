@@ -87,9 +87,27 @@ impl Browser {
         {
             return;
         }
+        // LoadStatus can still describe the previous document while a queued
+        // navigation is starting. Wait for the destination before querying its DOM.
+        if stage == 9 && self.view().page_title().as_deref() != Some("Request blocked") {
+            assert!(
+                test.since.elapsed() < Duration::from_secs(10),
+                "Offline probe never reached its blocked document: URL={}, title={:?}",
+                self.tab().url(),
+                self.view().page_title()
+            );
+            return;
+        }
         if test.pending {
             let result = test.result.borrow_mut().take();
             let Some(result) = result else { return };
+            if stage == 9
+                && matches!(result, Ok(servo::JSValue::Boolean(false)))
+                && test.since.elapsed() < Duration::from_secs(10)
+            {
+                self.harness.capabilities_test.as_mut().unwrap().pending = false;
+                return;
+            }
             if matches!(stage, 19 | 22 | 25) {
                 assert!(
                     self.chrome.dialog_key.is_none(),
@@ -130,7 +148,8 @@ impl Browser {
             24=>{if self.dialogs.controls.is_empty(){return;}self.ux_test_key(egui::Key::Escape);self.feature_stage(25);return;}
             25=>"window.__uxPrompt===null".to_owned(),
             26=>{let ctx=self.gui.as_ref().unwrap().egui_ctx.clone();self.set_theme(&ctx,crate::theme::Theme::Paper);self.navigate("wega://newtab");self.feature_stage(27);return;}
-            27=>"document.querySelector('nav')===null && document.querySelectorAll('.tiles .tile').length<=8 && getComputedStyle(document.documentElement).backgroundColor==='rgb(251, 249, 244)' && (()=>{const i=document.querySelector('form input[name=q]').getBoundingClientRect(),b=document.querySelector('form button').getBoundingClientRect();return Math.abs(i.top-b.top)<1 && i.height===48 && b.height===48 && b.left-i.right>=8})()".to_owned(),
+            27=>{assert!(self.chrome.page_focused && !self.chrome.focus_address,"New tab routes typing to its search field");
+                "(()=>{const ok=document.activeElement?.id==='search' && document.querySelector('nav')===null && document.querySelectorAll('.tiles .tile').length<=8 && getComputedStyle(document.documentElement).backgroundColor==='rgb(251, 249, 244)' && (()=>{const i=document.querySelector('form input[name=q]').getBoundingClientRect(),b=document.querySelector('form button').getBoundingClientRect();return Math.abs(i.top-b.top)<1 && i.height===48 && b.height===48 && b.left-i.right>=8})();return ok?true:JSON.stringify({focus:document.activeElement?.id,value:document.getElementById('search')?.value,title:document.title})})()".to_owned()},
             28=>{if test.frame_output.as_ref().is_none_or(|path| !path.ends_with("capabilities-newtab.png")){let test=self.harness.capabilities_test.as_mut().unwrap();test.frame_output=Some(self.profile_dir.join("capabilities-newtab.png"));test.frame_checked=false;self.window.request_redraw();return;}
                 if !test.frame_checked{return;}let _ = self.window.request_inner_size(winit::dpi::LogicalSize::new(720.0,480.0));self.chrome.show_history=true;self.feature_stage(29);return;}
             29=>{assert!(self.chrome.page_rect.width()>600.0,"Compact library must overlay rather than squeeze the page");assert!(self.chrome.library_rect.is_positive(),"Compact library must remain reachable");self.chrome.show_history=false;let ctx=self.gui.as_ref().unwrap().egui_ctx.clone();self.set_theme(&ctx,crate::theme::Theme::Emerald);self.feature_stage(30);return;}
@@ -190,7 +209,16 @@ impl Browser {
             80=>{if !self.feature_click("#upload-button"){return;}self.feature_stage(81);return;}
             81=>{if self.dialogs.controls.is_empty(){return;}self.coverage_click(&["Cancel"],|b,ui|b.ui(ui));assert!(self.dialogs.controls.is_empty());assert!(self.chrome.file_paths.is_empty());assert!(self.chrome.dialog_key.is_none());self.feature_stage(82);return;}
             82=>"document.getElementById('upload').files.length===0".to_owned(),
-            83=>{println!("CAPABILITIES TEST PASSED: engine policies, site data, prompt/focus semantics, settings, themes, native accessibility, permissions, HTTP authentication, validated file selection and select/color controls");self.harness.capabilities_test=None;event_loop.exit();return;}
+            83=>{self.new_tab();self.feature_stage(84);return;}
+            84=>{assert!(self.chrome.page_focused && !self.chrome.focus_address);
+                for character in "typed search".chars() {
+                    for state in [servo::KeyState::Down,servo::KeyState::Up] {
+                        self.view().notify_input_event(servo::InputEvent::Keyboard(servo::KeyboardEvent::from_state_and_key(state,servo::Key::Character(character.to_string()))));
+                    }
+                }
+                self.feature_stage(85);return;}
+            85=>"document.activeElement?.id==='search' && document.getElementById('search').value==='typed search'".to_owned(),
+            86=>{println!("CAPABILITIES TEST PASSED: engine policies, site data, prompt/focus semantics, settings, themes, native accessibility, permissions, HTTP authentication, validated file selection and select/color controls");self.harness.capabilities_test=None;event_loop.exit();return;}
             _=>return,
         };
         let result = self

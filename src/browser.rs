@@ -446,6 +446,16 @@ impl Browser {
         }
     }
 
+    pub(crate) fn new_tab(&mut self) {
+        self.add_tab("wega://newtab");
+        self.chrome.focus_address = false;
+        self.gui.as_ref().unwrap().egui_ctx.memory_mut(|memory| {
+            memory.surrender_focus(egui::Id::unique("address"));
+        });
+        self.chrome.page_focused = true;
+        self.view().set_focused(true);
+    }
+
     fn add_tab_url(&mut self, url: url::Url) {
         let live = self.create_view(Some(&url));
         let index = self.push_tab(Some(live), url.to_string(), String::new(), false);
@@ -912,7 +922,20 @@ impl Browser {
         for event in events {
             match event {
                 Event::Download(url, name) => self.offer_download(&url, &name),
-                Event::Load(owner, status) => self.automation_load_status(owner, status),
+                Event::Load(owner, status) => {
+                    self.automation_load_status(owner, status);
+                    if status == servo::LoadStatus::Complete
+                        && owner == self.view().id()
+                        && self.tab().url() == "wega://newtab"
+                        && self.chrome.page_focused
+                        && !self.modal()
+                    {
+                        self.view().evaluate_javascript(
+                            "document.getElementById('search')?.focus()",
+                            |_| {},
+                        );
+                    }
+                }
                 Event::History(owner, urls, active) => {
                     if let Some(index) = self.tab_index(owner) {
                         self.session.tabs_mut()[index].history.update(urls, active);
@@ -1382,8 +1405,7 @@ impl Browser {
                     }
                 }
                 "t" => {
-                    self.add_tab("about:blank");
-                    self.chrome.focus_address = true;
+                    self.new_tab();
                 }
                 "w" => self.close_tab(self.session.active()),
                 "q" => self.quit_requested = true,

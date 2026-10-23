@@ -296,3 +296,12 @@ and keyboard task testing are required in addition to palette checks.
 Keep the existing pointer, layout, console, debugger, history and profile checks.
 Add tests for user outcomes above; broad line coverage cannot substitute for
 usability, visual review or assistive-technology validation.
+
+
+### 23 October CI follow-up
+
+The original implementation and proposal follow-ups were committed as `7d6b1bc`.
+The subsequent [CI corrections and continued work](ui-ux-implementation.md#ci-corrections-and-continued-work--23-october-2026)
+track the missing Docker build script, chooser coverage gaps and macOS navigation
+race separately from the remaining platform/device validation. New-tab keyboard
+focus and Windows associated-file path handling are included in this follow-up.

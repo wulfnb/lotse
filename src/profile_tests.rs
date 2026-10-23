@@ -335,3 +335,20 @@ fn discard_timeout_defaults_to_thirty_minutes_for_old_profiles() {
         crate::model::SearchEngine::Google
     );
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_file_associations_open_absolute_paths_instead_of_searching() {
+    assert_eq!(
+        resolve_address(r"C:\Users\Alice\some page.html")
+            .unwrap()
+            .as_str(),
+        "file:///C:/Users/Alice/some%20page.html"
+    );
+    assert_eq!(
+        resolve_address(r"\\fileserver\share\some page.html")
+            .unwrap()
+            .as_str(),
+        "file://fileserver/share/some%20page.html"
+    );
+}

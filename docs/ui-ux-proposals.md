@@ -14,7 +14,9 @@ unfinished. P3 is polish.
 These follow-ups implement the first priority group and several related chrome
 improvements. It does **not** mark the whole proposal complete. See
 [implementation and verification](ui-ux-implementation.md#23-october-follow-up).
-Changes are uncommitted on `feature/windows-gateway-and-design-docs`.
+The original follow-ups were committed as `7d6b1bc` on
+`feature/windows-gateway-and-design-docs`. The CI corrections and continued work
+below are uncommitted; no push has been made in this follow-up.
 
 | Item | Current status |
 | --- | --- |
@@ -32,13 +34,13 @@ Changes are uncommitted on `feature/windows-gateway-and-design-docs`.
 | B5 | Implemented readable storage categories, site-first rows, destructive Remove last, and “Cookies on this site”. Site data now opens below the address bar from the connection control or existing menu. |
 | B6 | Partial: simple theme names and selected tab-layout controls. Three-color swatches are now included; explicit Glass Light/Dark choices are hidden when no native backdrop is available (Auto retains its opaque fallback). |
 | B7 | Compact brand and contextual close glyphs implemented, including keyboard focus. New tab already uses a full-width sidebar row and 36-point top-strip target. The duplicate sidebar bookmark action is removed; History remains accessible. |
-| B8 | New-tab shortcut grid combines deduplicated bookmarks/recent pages (up to eight), saved favicons/fallbacks and five recent links. Duplicate navigation removed; search requests HTML autofocus. Actual native keyboard focus and most-visited ranking still need follow-up. |
+| B8 | New-tab shortcut grid combines deduplicated bookmarks/recent pages (up to eight), saved favicons/fallbacks and five recent links. Duplicate navigation removed; search requests HTML autofocus. New-tab commands now share the search page and transfer keyboard focus to it; native key-input verification passes on macOS. Most-visited ranking remains open. |
 | B9 | Library fallback icons implemented. Network details move below the table in narrow docks; default columns fit available width, user-sized columns retain scrolling, scrollbars remain visible, and filter syntax is in a tooltip. |
 | C1 | ANGLE, packaged DLLs, embedded icon and Windows launch CI are already present in this branch. No branch merge was performed; real-PC validation remains required. |
 | C2 | Partial fallback: download-page/README disclosure and a startup warning in Windows builds without media. Bundled Windows playback and per-element messaging remain pending. |
-| C3 | Per-user Inno installer, Start menu/uninstall entries, browser capability registration and Windows Default apps launcher added. CI builds and checks install/uninstall. Compilation/runtime validation awaits Windows CI; signing, macOS default-browser integration and already-running-instance URL handoff remain open. |
+| C3 | Per-user Inno installer, Start menu/uninstall entries, browser capability registration and Windows Default apps launcher added. CI builds and checks install/uninstall. Absolute drive and UNC HTML paths now resolve to file URLs instead of web searches. Compilation/runtime validation awaits Windows CI; signing, macOS default-browser integration and already-running-instance URL handoff remain open. |
 | C4 | Implemented confirmed URI dispatch with Windows ShellExecuteW and Linux xdg-open; macOS open is retained. Windows/Linux runtime checks remain required. |
-| C5 | Pending: platform backdrop support and theme filtering. |
+| C5 | Theme filtering is implemented: explicit Glass Light/Dark choices are hidden without a native backdrop. Windows backdrop support and real desktop-compositor checks remain pending. |
 | D | Recorded as an observed rendering gap in the capability matrix; CSS-mask diagnosis is unconfirmed. |
 
 ## Evidence

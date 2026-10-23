@@ -1,6 +1,9 @@
 # UI/UX implementation — 22 October 2026
 
 All 16 findings from [the review](ui-ux-review.md) have implementation changes.
+The original follow-ups were committed as `7d6b1bc`; later CI fixes and continued
+work are recorded at the end. Commit statements in earlier checkpoints describe
+those checkpoints, not the current Git state.
 The [23 October follow-up](#23-october-follow-up) tracks the separate second-pass backlog.
 The original review describes the pre-change experience. This document records
 the resulting behavior and the limits of verification; it does not certify every
@@ -322,3 +325,91 @@ suite: 32 tests passed. JavaScript: 557/557 lines passed the existing 100% gate.
 Clippy, formatting, shell syntax and diff whitespace checks passed. Docker HTTPS
 chooser IPC/UID regression passed; its disposable container and overlay image
 were removed. No new Python line/branch coverage percentage is claimed here.
+
+
+## CI corrections and continued work — 23 October 2026
+
+[PR #4 run 39983191666](https://github.com/wulfnb/wega/actions/runs/39983191666)
+failed for three separate reasons:
+
+- The Docker builder omitted the package's `build.rs`. It now copies the script
+  before Cargo runs; a release regression checks that the manifest's build script
+  is among those build inputs.
+- Core Rust coverage passed, but eight defensive chooser-gateway lines were
+  uncovered. Added tests exercise oversized/malformed manifests, missing and
+  non-file uploads, an atomic claim race and failed publication with safe retry.
+  The gateway's 100% line threshold is unchanged. Direct invocation of the auth
+  test module now includes chooser tests as well as unittest discovery.
+- The instrumented macOS capabilities test queried the prior document during an
+  offline navigation. It now waits for the blocked destination and retries the
+  DOM predicate within a bounded deadline, retaining the actual offline assertion.
+
+An additional Linux runtime check exposed an early-rejection race in the direct
+Unix-socket auth test client: the gateway can return 403 before the client's
+separate JSON body write. The test now reads and asserts the actual response on
+`BrokenPipeError` and always closes the connection; no rejection assertion or
+gateway guard was removed. Empty 204 replies also avoid a needless body write
+after the client has received their headers; a regression simulates a closed
+body stream and verifies that no write occurs.
+
+Continued proposal work:
+
+- Windows HTML associations now resolve native absolute drive and UNC paths to
+  file URLs, including spaces, rather than sending them to web search. A
+  Windows-only regression covers both forms; Windows execution remains required.
+- New tab menu, plus button and Cmd/Ctrl+T share one search-page action. It clears
+  address-field focus and routes typing to the page; completion focuses the
+  search field only while the page still owns focus, so Cmd/Ctrl+L can interrupt.
+  The native capabilities case sends key events to Servo and checks the resulting
+  search-field value without clicking the page. It also checks that the browser
+  routes typing to the page; this does not certify OS-level IME behavior.
+
+These corrections remain uncommitted and have not been pushed. Whole-project
+100% coverage, Windows runtime/signing/media/backdrops, macOS default-browser
+registration, running-instance URI handoff, most-visited ranking, frame-queue quality adaptation,
+independent viewer pinch/pan, the confirmed Wikipedia engine fix and the listed
+real-device/assistive-technology/production-proxy checks remain outstanding.
+
+
+Local verification for the CI follow-up:
+
+- Fresh isolated core measurement: **1555/1628 lines (95.52%)**, 74 tests passed;
+  the unchanged 95% gate passes on macOS. The failing Ubuntu run had already
+  passed its Rust gate; its gateway coverage was the failure.
+- Full Python discovery: **52 tests passed**, gateway **443/443 lines** and
+  **158/158 branches**. The unchanged 100% line gate passes.
+- Final instrumented desktop run: **76 library + 34 desktop unit tests passed**;
+  all eight native suites passed (smoke, theme, capabilities, toolbox, download,
+  WebDriver, media and capture). The capabilities run checks focused new-tab key
+  input and the blocked offline document. Desktop line measurement is
+  **10564/12716 (83.08%)**; whole-project 100% remains outstanding.
+- The new-tab capture was inspected; it retains the fixture's deliberate 1.5×
+  pinch zoom. This is not a default-zoom full-page or real-device certification.
+
+Artifacts: `target/ci-fix/`, `target/coverage/rust/`,
+`target/coverage/python/` and `target/coverage/desktop/`.
+
+
+Fresh Linux ARM64 Docker verification:
+
+- Built the current Rust sources with `BUILD_PROFILE=dev` and `test-harness`;
+  this checks the missing-build-script fix in a fresh Linux build. License-notice
+  generation was disabled for this disposable debug image.
+- Authentication/session rotation/WebSocket revocation, rendering smoke, native
+  downloads, HTTPS gateway/chooser UID/security checks and all shell contracts
+  passed. Current gateway/viewer sources were mounted for the HTTPS regression.
+- Toolbox **failed** at the Memory probe: the process aborts in pinned Servo's
+  `servo-script-bindings-0.7.0/mem.rs:19` with `attempt to add with overflow`.
+  This was reproduced on both fresh ARM64 debug builds. The root cause is not
+  isolated; no test assertion or overflow check was disabled. Linux release and
+  x86_64 impact are unconfirmed, and GitHub's Ubuntu release job has not rerun.
+  See [the capability matrix](servo-capabilities.md). A complete Linux toolbox
+  pass and fully green cross-platform CI are not claimed.
+- Disposable test containers/networks were removed. The newer gateway empty-204
+  write guard is covered by Python tests; the full Docker image predates that
+  Python-only guard, while its native binary includes the final UI changes.
+
+Linux evidence: `target/ci-fix/docker-final-build.log`,
+`target/ci-fix/linux-final-checks.log` and `target/ci-fix/linux-container.log`.
+The remaining UI and platform backlog is still open; this checkpoint does not
+mark the entire proposal complete.

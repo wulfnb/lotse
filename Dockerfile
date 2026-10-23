@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=servo-registry-${TARGETARCH},target=/usr/local/cargo/r
         cargo install cargo-about --locked --features cli --version "${CARGO_ABOUT_VERSION}"; \
     fi
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY vendor ./vendor
 COPY src ./src
 COPY assets/icons/browser-icon-256.png ./assets/icons/browser-icon-256.png

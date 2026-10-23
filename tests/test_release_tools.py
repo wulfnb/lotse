@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import runpy
+import shlex
 import sys
 import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
@@ -164,6 +166,20 @@ class MediaPackagerTests(unittest.TestCase):
         with patch.object(media, 'bundle') as bundle:
             media.main([str(self.app)])
             bundle.assert_called_once_with(str(self.app))
+
+class DockerBuildInputsTests(unittest.TestCase):
+    def test_package_build_script_is_copied_before_cargo_build(self):
+        manifest = tomllib.loads((ROOT / 'Cargo.toml').read_text())
+        build_script = manifest['package']['build']
+        self.assertTrue((ROOT / build_script).is_file())
+        before_build = (ROOT / 'Dockerfile').read_text().split('    cargo build --locked', 1)[0]
+        sources = []
+        for line in before_build.splitlines():
+            if line.startswith('COPY ') and '--from=' not in line:
+                sources.extend(shlex.split(line)[1:-1])
+        self.assertIn(build_script, sources,
+                      'Fresh Docker builds need the package build script, not just Cargo.toml and src/')
+
 
 if __name__ == '__main__':
     unittest.main()

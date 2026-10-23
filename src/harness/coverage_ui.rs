@@ -246,6 +246,8 @@ impl Browser {
         let tabs = self.session().tabs().len();
         key(self, "t", command);
         assert_eq!(self.session().tabs().len(), tabs + 1);
+        assert_eq!(self.tab().url(), "wega://newtab");
+        assert!(self.chrome.page_focused && !self.chrome.focus_address);
         key(self, "1", command);
         assert_eq!(self.view().id(), original);
         key(self, "9", command);

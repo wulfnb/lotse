@@ -347,7 +347,8 @@ class Handler(BaseHTTPRequestHandler):
         if token is not None:
             self.send_header('Set-Cookie', f'{COOKIE}={token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={43200 if token else 0}')
         self.end_headers()
-        self.wfile.write(body)
+        if body:
+            self.wfile.write(body)
 
     def do_GET(self):
         with LOCK:

@@ -245,7 +245,9 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
         handler.send_header = lambda *_: None
         handler.end_headers = lambda: None
         handler.wfile = io.BytesIO()
-        handler.reply(204)
+        with patch.object(handler.wfile, 'write', side_effect=BrokenPipeError) as write:
+            handler.reply(204)
+            write.assert_not_called()
         self.assertEqual(handler.wfile.getvalue(), b'')
         handler.log_message('sensitive message')
         auth.ATTEMPTS.clear()
@@ -573,10 +575,6 @@ class SupervisorWatchdogTests(unittest.TestCase):
             runpy.run_path(WATCHDOG_SPEC.origin, run_name='__main__')
         self.assertEqual(output.getvalue(), 'READY\n')
 
-
-if __name__ == '__main__':
-    unittest.main()
-
 class ChooserTests(AuthHelpers, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -620,3 +618,39 @@ class ChooserTests(AuthHelpers, unittest.TestCase):
         self.assertIsNone(auth.chooser_request())
         (self.chooser/'current.json').unlink()
         self.assertIsNone(auth.chooser_request())
+
+    def test_chooser_metadata_and_file_guards_fail_closed(self):
+        self.publish(origin='x'*9000)
+        self.assertIsNone(auth.chooser_request())
+        self.publish(extensions=None)
+        self.assertIsNone(auth.chooser_request())
+        self.publish()
+        auth.UPLOADS.mkdir(exist_ok=True)
+        missing=auth.UPLOADS/'file-missing'/'missing.txt'
+        with self.assertRaisesRegex(ValueError,'unavailable'):
+            auth.choose_uploaded_files({'id':'a'*32,'paths':[str(missing)]})
+        folder=auth.UPLOADS/'file-folder'/'directory'
+        folder.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError,'unavailable'):
+            auth.choose_uploaded_files({'id':'a'*32,'paths':[str(folder)]})
+
+    def test_chooser_atomic_claim_and_publication_failure(self):
+        snapshot=self.publish()
+        marker=self.chooser/('accepted-'+'a'*32)
+        marker.write_bytes(b'')
+        # Another request claims the chooser after our manifest snapshot.
+        with patch.object(auth,'chooser_request',return_value=snapshot):
+            with self.assertRaisesRegex(ValueError,'already answered'):
+                auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        marker.unlink()
+        with patch.object(auth,'atomic',side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError,'disk full'):
+                auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        self.assertFalse(marker.exists(),'Failed publication must permit a safe retry')
+        self.assertIsNotNone(auth.chooser_request())
+        auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        self.assertTrue(marker.exists())
+
+
+if __name__ == '__main__':
+    unittest.main()

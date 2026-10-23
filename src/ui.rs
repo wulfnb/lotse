@@ -688,8 +688,7 @@ impl Browser {
                     )
                     .clicked()
                 {
-                    self.add_tab("wega://newtab");
-                    self.chrome.focus_address = true;
+                    self.new_tab();
                     ui.close();
                 }
                 if ui.button("Reopen closed tab").clicked() {
@@ -1015,8 +1014,7 @@ impl Browser {
                     self.discard_tab(i);
                 }
                 TabAction::New => {
-                    self.add_tab("wega://newtab");
-                    self.chrome.focus_address = true;
+                    self.new_tab();
                 }
                 TabAction::Layout => self.toggle_layout(),
                 TabAction::Move(from, to) => {

@@ -277,7 +277,7 @@ pub fn resolve_address_with(input: &str, policy: &crate::model::Policy) -> Resul
     if input.is_empty() {
         return Url::parse(HOME).map_err(|e| e.to_string());
     }
-    if input.starts_with('/') {
+    if Path::new(input).is_absolute() {
         return Url::from_file_path(input).map_err(|_| "Invalid local file path".into());
     }
     if input.contains("://") || input.starts_with("about:") || input.starts_with("data:") {
