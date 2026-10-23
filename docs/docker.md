@@ -152,6 +152,7 @@ limits in `.env`:
 | `WEGA_UPLOAD_RETENTION_DAYS` | `7` | Delete viewer uploads older than this (0 keeps them) |
 | `WEGA_TLS_SANS` | empty | Extra certificate names/addresses |
 | `WEGA_TRUSTED_PROXIES` | empty | Reverse proxies trusted for `X-Forwarded-For` |
+| `WEGA_HTTP_PORT` | empty | Extra plain-HTTP port (1024–65535) for a TLS-terminating reverse proxy |
 
 Authentication is required. On first start, set `WEGA_WEB_USER` and
 `WEGA_WEB_PASSWORD` in `.env`; Compose passes them as `BROWSER_USER` and
@@ -232,6 +233,19 @@ compares it with `Origin`), support WebSocket upgrades on `/websockify`, and set
 the client address from `X-Forwarded-For` (`real_ip_recursive on`), so login
 rate limiting applies per client instead of to the proxy as a whole. Without
 that setting, `X-Forwarded-For` is ignored.
+
+If the proxy terminates TLS itself and cannot verify the generated certificate
+(Traefik, Caddy or an ingress controller talking to the container by IP), set
+`WEGA_HTTP_PORT` (for example `7080`) and proxy to `http://<container>:7080`
+instead. Port 7443 keeps serving HTTPS. Only do this when the proxy reaches
+the container over a trusted network: the same host, an encrypted overlay
+(`docker network create --opt encrypted`) or a cluster network you already
+trust, because credentials and the screen stream cross that hop unencrypted.
+Never publish the HTTP port. A browser cannot sign in on it directly anyway:
+the gateway accepts only an `https://` `Origin` matching the forwarded `Host`,
+and the `__Host-` session cookie is `Secure`, so login and the WebSocket work
+only through an HTTPS front end. The proxy must still pass the original `Host`
+header, and `WEGA_TRUSTED_PROXIES` should name it.
 
 Failed logins are limited to ten per minute per client address. Up to 4096
 addresses are tracked; beyond that the oldest entries are evicted.

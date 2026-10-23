@@ -210,6 +210,25 @@ def main():
         assert realip.exists()
         run('docker/entrypoint.sh', env=env)
         assert not realip.exists(), 'unsetting WEGA_TRUSTED_PROXIES must remove the include'
+        # An optional plain-HTTP port renders a listen include; invalid ports abort.
+        listener = Path('/run/wega/browser/server-http.conf')
+        result = run('docker/entrypoint.sh', env=dict(env, WEGA_HTTP_PORT='7080'))
+        assert listener.read_text() == 'listen 7080;\n' and (listener.stat().st_mode & 0o777) == 0o644
+        assert not Path(str(listener) + '.new').exists()
+        assert 'expose it only to a TLS-terminating reverse proxy' in result.stderr, result.stderr
+        assert 'without WEGA_TRUSTED_PROXIES' in result.stderr, result.stderr
+        result = run('docker/entrypoint.sh', env=dict(env, WEGA_HTTP_PORT='7080', WEGA_TRUSTED_PROXIES='10.0.0.0/24'))
+        assert 'without WEGA_TRUSTED_PROXIES' not in result.stderr, result.stderr
+        invalid, out_of_range = 'WEGA_HTTP_PORT: invalid port', 'WEGA_HTTP_PORT must be 1024-65535'
+        for port, message in [('http', invalid), ('-1', invalid), ('07080', invalid), ('80', out_of_range), ('1023', out_of_range),
+                              ('7443', out_of_range), ('65536', out_of_range), ('99999999999999999999', out_of_range)]:
+            result = run('docker/entrypoint.sh', env=dict(env, WEGA_HTTP_PORT=port), success=False)
+            assert message in result.stderr, (port, result.stderr)
+            assert not listener.exists(), 'a rejected port must not leave a stale listener active'
+        run('docker/entrypoint.sh', env=dict(env, WEGA_HTTP_PORT='65535'))
+        assert listener.read_text() == 'listen 65535;\n'
+        run('docker/entrypoint.sh', env=env)
+        assert not listener.exists(), 'unsetting WEGA_HTTP_PORT must remove the listener'
         # Legacy uploads move from the credential directory; existing names win.
         legacy = Path('/config/auth/uploads')
         (legacy / 'folder').mkdir(parents=True)

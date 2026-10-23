@@ -67,6 +67,34 @@ try:
     assert request("/websockify", websocket=True)[0] == 401
     assert request("/websockify", cookie, websocket=True)[0] == 101
     assert request(f"/downloads/{filename}", cookie)[1] == payload.encode()
+    if environment.get("WEGA_HTTP_PORT"):
+        # The plain-HTTP port is reached the way a TLS-terminating proxy would: from
+        # inside the network, forwarding the public Host. Only https:// Origins pass.
+        http_check = f"""
+import http.client, json, sys
+def call(path, origin, data=None, cookie=None, websocket=False):
+    headers = {{"Host": "wega.example", "Origin": origin}}
+    if cookie: headers["Cookie"] = cookie
+    if data is not None: headers["Content-Type"] = "application/json"
+    if websocket: headers.update({{"Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Version": "13",
+                                  "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Protocol": "binary"}})
+    connection = http.client.HTTPConnection("127.0.0.1", {int(environment["WEGA_HTTP_PORT"])}, timeout=10)
+    connection.request("POST" if data is not None else "GET", path, body=None if data is None else json.dumps(data), headers=headers)
+    response = connection.getresponse()
+    return response.status, response.getheader("Set-Cookie")
+credentials = json.load(sys.stdin)
+assert call("/auth/login", "http://wega.example", credentials)[0] == 403
+status, cookie = call("/auth/login", "https://wega.example", credentials)
+assert status == 200 and "Secure" in cookie and cookie.startswith("__Host-")
+cookie = cookie.split(";", 1)[0]
+assert call("/novnc/core/rfb.js", "https://wega.example")[0] == 401
+assert call("/novnc/core/rfb.js", "https://wega.example", cookie=cookie)[0] == 200
+assert call("/websockify", "http://wega.example", cookie=cookie, websocket=True)[0] == 403
+assert call("/websockify", "https://wega.example", cookie=cookie, websocket=True)[0] == 101
+"""
+        subprocess.run(["docker", "exec", "-i", container, "python3", "-c", http_check],
+                       input=json.dumps(credentials), text=True, check=True, cwd=ROOT)
+        print("PASS: plain-HTTP port accepts only https:// origins (login, assets, WebSocket)")
     mount = next(m for m in info["Mounts"] if m["Destination"] == "/config/Downloads")
     assert mount["Type"] == "bind", "Downloads must use the configured host directory"
     assert (Path(mount["Source"]) / filename).read_text() == payload
