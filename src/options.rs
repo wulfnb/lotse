@@ -148,6 +148,18 @@ impl Options {
     }
 }
 
+/// Only declared web/document schemes may arrive from an OS open event.
+/// This does not expose internal pages or command-line options to other apps.
+pub fn external_launch_urls(addresses: &[String]) -> Vec<url::Url> {
+    addresses
+        .iter()
+        .filter(|address| address.len() <= 8192)
+        .filter_map(|address| url::Url::parse(address).ok())
+        .filter(|url| matches!(url.scheme(), "http" | "https" | "file"))
+        .take(32)
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "options_tests.rs"]
 mod tests;

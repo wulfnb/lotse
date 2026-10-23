@@ -20,6 +20,9 @@ pub struct Bookmark {
     pub url: String,
     #[serde(default)]
     pub visited_at: u64,
+    /// Visits observed for this history entry; zero means an older unknown count.
+    #[serde(default)]
+    pub visit_count: u64,
 }
 
 /// Largest accepted encoded favicon. 64×64 RGBA is 16 KiB uncompressed.
@@ -151,11 +154,13 @@ impl Default for Profile {
                     title: "Servo".into(),
                     url: "https://servo.org/".into(),
                     visited_at: 0,
+                    visit_count: 0,
                 },
                 Bookmark {
                     title: "Rust".into(),
                     url: "https://www.rust-lang.org/".into(),
                     visited_at: 0,
+                    visit_count: 0,
                 },
             ],
             history: Vec::new(),
@@ -213,6 +218,20 @@ impl Profile {
         }
     }
 
+    /// Keep saved pages first, then fill with frequent pages. Stable sorting keeps
+    /// recent history order when counts tie. History deletion removes counts too.
+    pub fn new_tab_shortcuts(&self) -> Vec<&Bookmark> {
+        let mut frequent: Vec<_> = self.history.iter().collect();
+        frequent.sort_by_key(|entry| std::cmp::Reverse(entry.visit_count.max(1)));
+        let mut seen = std::collections::HashSet::new();
+        self.bookmarks
+            .iter()
+            .chain(frequent)
+            .filter(|entry| seen.insert(entry.url.as_str()))
+            .take(8)
+            .collect()
+    }
+
     pub fn toggle_bookmark(&mut self, title: String, url: String) {
         if let Some(index) = self
             .bookmarks
@@ -225,6 +244,7 @@ impl Profile {
                 title,
                 url,
                 visited_at: 0,
+                visit_count: 0,
             });
         }
     }

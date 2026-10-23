@@ -112,6 +112,7 @@ fn settings_and_collections_use_validated_commands() {
             title: index.to_string(),
             url: format!("https://{index}.test"),
             visited_at: index,
+            visit_count: 0,
         }));
     }
     assert_eq!(app.profile().history.len(), 1000);
@@ -119,6 +120,7 @@ fn settings_and_collections_use_validated_commands() {
         title: "Renamed".into(),
         url: "https://1001.test".into(),
         visited_at: 2000,
+        visit_count: 0,
     }));
     assert_eq!(app.profile().history.len(), 1000);
     assert_eq!(app.profile().history[0].title, "Renamed");
@@ -126,7 +128,8 @@ fn settings_and_collections_use_validated_commands() {
         app.apply(Command::Visit(Bookmark {
             title: "secret".into(),
             url: "data:text/plain,secret".into(),
-            visited_at: 0
+            visited_at: 0,
+            visit_count: 0,
         })),
         Event::Unchanged
     );
@@ -256,5 +259,43 @@ fn download_policy_precedes_external_effects_and_adapter_errors_survive() {
             4,
             "private cookie".into()
         )]
+    );
+}
+
+#[test]
+fn visit_frequency_survives_reload_saturates_and_clears_with_history() {
+    let (mut app, _, _) = application(false, false);
+    let visit = |url: &str| {
+        Command::Visit(Bookmark {
+            title: url.into(),
+            url: url.into(),
+            visited_at: 1,
+            visit_count: 0,
+        })
+    };
+    app.apply(visit("https://frequent.test/"));
+    app.apply(visit("https://frequent.test/"));
+    app.apply(visit("https://frequent.test/"));
+    app.apply(visit("https://new.test/"));
+    let restored: Profile =
+        serde_json::from_str(&serde_json::to_string(app.profile()).unwrap()).unwrap();
+    assert_eq!(restored.history[1].visit_count, 3);
+    assert_eq!(
+        restored.new_tab_shortcuts()[2].url,
+        "https://frequent.test/"
+    );
+    assert_eq!(restored.history[0].url, "https://new.test/");
+    app.profile.history[1].visit_count = u64::MAX;
+    app.apply(visit("https://frequent.test/"));
+    assert_eq!(app.profile.history[0].visit_count, u64::MAX);
+    // A legacy history entry had an unknown count but was visited at least once.
+    app.profile.history[0].visit_count = 0;
+    app.apply(visit("https://frequent.test/"));
+    assert_eq!(app.profile.history[0].visit_count, 2);
+    app.apply(Command::ClearHistory);
+    assert!(app.profile.history.is_empty());
+    assert_eq!(
+        app.profile.new_tab_shortcuts().len(),
+        app.profile.bookmarks.len()
     );
 }

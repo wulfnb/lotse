@@ -448,6 +448,23 @@ impl Browser {
 
     pub(crate) fn new_tab(&mut self) {
         self.add_tab("wega://newtab");
+        self.focus_content();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_launch_urls(&mut self, urls: Vec<url::Url>) {
+        if urls.is_empty() {
+            return;
+        }
+        for url in urls {
+            self.add_tab_url(url);
+        }
+        self.focus_content();
+        self.window.set_visible(true);
+        self.window.request_redraw();
+    }
+
+    fn focus_content(&mut self) {
         self.chrome.focus_address = false;
         self.gui.as_ref().unwrap().egui_ctx.memory_mut(|memory| {
             memory.surrender_focus(egui::Id::unique("address"));
@@ -1146,6 +1163,7 @@ impl Browser {
                         title,
                         url,
                         visited_at: profile::visit_time(),
+                        visit_count: 0,
                     }));
                 }
                 Event::Accessibility(id, nodes) => {

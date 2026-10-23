@@ -364,7 +364,7 @@ Continued proposal work:
   search-field value without clicking the page. It also checks that the browser
   routes typing to the page; this does not certify OS-level IME behavior.
 
-These corrections remain uncommitted and have not been pushed. Whole-project
+These corrections were committed as `6256600` before the next follow-up; the agent has not pushed. At that checkpoint, whole-project
 100% coverage, Windows runtime/signing/media/backdrops, macOS default-browser
 registration, running-instance URI handoff, most-visited ranking, frame-queue quality adaptation,
 independent viewer pinch/pan, the confirmed Wikipedia engine fix and the listed
@@ -398,7 +398,7 @@ Fresh Linux ARM64 Docker verification:
 - Authentication/session rotation/WebSocket revocation, rendering smoke, native
   downloads, HTTPS gateway/chooser UID/security checks and all shell contracts
   passed. Current gateway/viewer sources were mounted for the HTTPS regression.
-- Toolbox **failed** at the Memory probe: the process aborts in pinned Servo's
+- At this checkpoint toolbox **failed** at the Memory probe: the process aborts in pinned Servo's
   `servo-script-bindings-0.7.0/mem.rs:19` with `attempt to add with overflow`.
   This was reproduced on both fresh ARM64 debug builds. The root cause is not
   isolated; no test assertion or overflow check was disabled. Linux release and
@@ -413,3 +413,118 @@ Linux evidence: `target/ci-fix/docker-final-build.log`,
 `target/ci-fix/linux-final-checks.log` and `target/ci-fix/linux-container.log`.
 The remaining UI and platform backlog is still open; this checkpoint does not
 mark the entire proposal complete.
+
+
+## Allocation reports and remaining UI work — 23 October 2026
+
+The prior CI corrections are saved in `6256600`. This follow-up fixes the Linux
+Memory failure and continues the separate proposal backlog.
+
+### Real allocation-report fix
+
+Pinned Servo generated a Box-style size callback for Rc-backed DOM classes.
+The pointer returned by `Rc::into_raw` addresses the value after the allocation's
+reference-count header; passing it to the allocator's size API is invalid. This
+caused the Linux ARM64 debug overflow during the real toolbox Memory probe.
+
+The published `servo-script-bindings` 0.7.0 crate is now vendored. Its generator
+selects the correct callback for each allocation kind. Rc-backed objects acquire
+a temporary strong reference and use Servo's existing Rc measurement trait to
+measure the allocation base and contained values; the temporary reference then
+drops. Box-backed objects keep their original path. No arithmetic checks or
+Memory assertions were disabled, and no installed Cargo source was changed.
+
+Two Rust regressions check aligned Rc allocation pointers, preserved ownership
+counts and the Box path. A Python regression executes the actual DOM vtable
+generator for both kinds. See [the vendor patch notes](../vendor/README.md).
+Coverage fingerprints now include embedded JavaScript and vendored source and
+generator changes, preventing stale reports from validating a changed engine.
+
+A fresh Linux ARM64 debug/test-harness build passes both allocation regressions.
+The resulting image passes authentication/session rotation/WebSocket revocation,
+rendering smoke, the full toolbox including Memory reports, downloads, current
+HTTPS gateway/chooser security and UID checks, and all shell contracts. Test
+containers/networks were removed. Evidence: `target/ci-fix/rc-linux-checks.log`,
+`linux-rc-final-build.log` and `linux-container.log`. GitHub Ubuntu release CI has
+not rerun; this is local ARM64 evidence.
+
+### Most-visited shortcuts
+
+History entries persist a saturating visit count. Saved bookmarks stay first;
+remaining shortcut positions use frequency, with recency as the tie breaker,
+URL deduplication and the existing eight-tile limit. The recent-links section
+retains chronological order. Old profiles default missing counts to unknown and
+retain their order until new visits establish frequency. Counts live only in
+bounded history entries, so history deletion or eviction removes them too.
+
+Regression tests cover profile migration/round-trip, repeated visits, overflow,
+frequency versus recency, bookmark precedence, deduplication, limits and history
+clearing. The native capabilities fixture checks a genuinely ranked shortcut in
+the rendered document as well as new-tab keyboard input.
+
+### macOS browser registration and launch events
+
+The app bundle declares HTTP/HTTPS viewing and HTML/XHTML document associations,
+with an Alternate document-handler rank. Browsing settings opens System Settings
+and explains where to choose Wega. Installation in Applications and the user's
+explicit default-browser choice remain required; no default was changed.
+
+Dedicated Apple-event handlers forward web URLs and local document URLs to new
+tabs in the existing browser. Early events are queued until initialization.
+Handlers are registered again after AppKit startup, preserving winit's own
+application delegate. URL strings are decoded separately from file descriptors:
+Cocoa's file coercion can reinterpret an HTTP string as an HFS filesystem path.
+Only HTTP, HTTPS and file schemes are accepted, with per-address and batch limits.
+
+`scripts/macos-launch-test.py` creates a uniquely identified disposable app and
+profile, launches a real cold-start HTTP event, then sends two URLs and an HTML
+file containing spaces, an ampersand and an accented character to the running
+app. WebDriver checks loaded titles/URLs, tab counts and the unchanged process.
+The test normalizes macOS's decomposed Unicode filename representation. Cleanup
+terminates only that executable and unregisters only the disposable test app.
+The desktop coverage runner includes this test on macOS and preserves failure
+status. Installer/default-browser selection on real machines, Windows instance
+handoff, Developer ID signing and notarization remain separate release checks.
+
+### Remaining proposal work
+
+Implementation still open: frame-queue-driven viewer quality adaptation;
+independent viewer viewport pinch/pan; bundled Windows media and per-element
+fallbacks; a native Windows backdrop; Windows running-instance URL handoff; the
+confirmed Wikipedia icon engine fix; and remembered permission grants/current
+access revocation once the engine exposes sufficient origin/access information.
+
+Validation/release work still open: Windows build/installer/runtime and physical
+PC checks; real iOS/Android keyboard, IME, gestures and clipboard tasks; screen
+reader and OS accessibility settings; a real OS appearance toggle and compositor
+checks; production-proxy restart recovery; signing/notarization credentials; and
+complete cross-platform whole-project coverage. Core/gateway component gates do
+not establish whole-project 100% or a fully finished browser.
+
+
+### Final local verification for this follow-up
+
+- Core: **77 tests passed**, **1591/1664 lines (95.61%)**; the 95% gate passes.
+- Python: **55 tests passed**; gateway **443/443 lines and 158/158 branches**.
+  The unchanged 100% line gate passes.
+- Instrumented desktop: **79 library + 34 desktop + 2 allocation tests passed**.
+  All eight native suites pass: smoke, theme, capabilities, toolbox, download,
+  WebDriver, media and capture. Real cold-start URL and same-process batched URL
+  plus Unicode HTML-file Launch Services delivery also pass.
+- Desktop measurement: **10721/12888 lines (83.19%)**. Whole-project 100% and all
+  required platform reports remain outstanding. Coverage inventory is refreshed;
+  report completeness has not been claimed or its policy weakened. The new
+  Launch Services regression is classified with the other test drivers.
+- Production and test-harness Clippy, formatting, package-script syntax and
+  first-party/modified-vendor-line whitespace checks pass. The imported archive
+  retains its original upstream whitespace; only its two documented files differ
+  from the published crate. Existing vendored Servo and macOS linker warnings
+  remain. The new-tab capture was inspected; the fixture still uses its deliberate
+  1.5× pinch zoom and does not certify default-zoom or device layout.
+
+Evidence: `target/ci-fix/{core-followup-final,python-followup,desktop-followup}.log`,
+`target/coverage/{rust,python,desktop}/`, and desktop native run
+`run-hrdawz1d/` (including `macos-launch/launch-l7eljkqf/result.json`). The fresh
+Linux evidence is listed above. The agent has not pushed or changed the user's
+default browser. GitHub's Linux x86_64 release and Windows checks must run after
+push before cross-platform CI can be called green.

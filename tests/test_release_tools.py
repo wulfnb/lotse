@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import plistlib
 from pathlib import Path
 import runpy
 import shlex
@@ -179,6 +180,19 @@ class DockerBuildInputsTests(unittest.TestCase):
                 sources.extend(shlex.split(line)[1:-1])
         self.assertIn(build_script, sources,
                       'Fresh Docker builds need the package build script, not just Cargo.toml and src/')
+
+
+class MacBundleTypesTests(unittest.TestCase):
+    def test_bundle_declares_web_urls_and_html_viewing_without_claiming_ownership(self):
+        script = (ROOT / 'scripts/package-macos.sh').read_text()
+        xml = script.split("<<'PLIST'\n", 1)[1].split('\nPLIST', 1)[0]
+        info = plistlib.loads(xml.encode())
+        self.assertEqual(info['CFBundleURLTypes'][0]['CFBundleURLSchemes'], ['http', 'https'])
+        self.assertEqual(info['CFBundleURLTypes'][0]['CFBundleTypeRole'], 'Viewer')
+        document = info['CFBundleDocumentTypes'][0]
+        self.assertEqual(document['CFBundleTypeRole'], 'Viewer')
+        self.assertEqual(document['LSHandlerRank'], 'Alternate')
+        self.assertEqual(document['LSItemContentTypes'], ['public.html', 'public.xhtml'])
 
 
 if __name__ == '__main__':

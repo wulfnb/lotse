@@ -20,14 +20,10 @@ impl Browser {
             }
             _ => "<span class='page-icon' aria-hidden='true'>▤</span>".into(),
         };
-        let mut seen = std::collections::HashSet::new();
         let shortcuts = self
             .profile()
-            .bookmarks
-            .iter()
-            .chain(self.profile().history.iter())
-            .filter(|entry| seen.insert(entry.url.clone()))
-            .take(8)
+            .new_tab_shortcuts()
+            .into_iter()
             .map(|entry| {
                 format!(
                     "<a class='tile' href='{}'>{}<span>{}</span></a>",
@@ -332,6 +328,14 @@ impl Browser {
                     #[cfg(target_os="windows")]
                     if ui.button("Open default browser settings").clicked() {
                         if let Err(error)=crate::ux::open_external(&url::Url::parse("ms-settings:defaultapps").unwrap()) {self.notify(crate::ux::Severity::Error,error,None);}
+                    }
+                    #[cfg(target_os="macos")]
+                    {
+                        if ui.button("Open System Settings").clicked() {
+                            let result=std::process::Command::new("/usr/bin/open").args(["-b","com.apple.systempreferences"]).spawn();
+                            if let Err(error)=result {self.notify(crate::ux::Severity::Error,format!("Could not open System Settings: {error}"),None);}
+                        }
+                        ui.label("Install Wega in Applications, then choose it under Default web browser in System Settings. Look in Desktop & Dock, or General on macOS 12.");
                     }
                     ui.heading("Navigation and requests");
                     ui.label("Host rules match the exact host and its subdomains. Separate hosts with spaces or newlines.");

@@ -9,6 +9,8 @@ use winit::{event_loop::EventLoopProxy, window::Window};
 
 #[derive(Clone, Debug)]
 pub enum Wake {
+    #[cfg(target_os = "macos")]
+    OpenUrls(Vec<String>),
     Servo,
     Ui,
     Media(servo::MediaSessionActionType),

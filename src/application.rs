@@ -79,13 +79,19 @@ impl Application {
                 self.profile.bookmarks.remove(index);
             }
             Command::ClearHistory => self.profile.history.clear(),
-            Command::Visit(visit) => {
+            Command::Visit(mut visit) => {
                 if !["http://", "https://", "file://"]
                     .iter()
                     .any(|scheme| visit.url.starts_with(scheme))
                 {
                     return Event::Unchanged;
                 }
+                visit.visit_count = self
+                    .profile
+                    .history
+                    .iter()
+                    .find(|entry| entry.url == visit.url)
+                    .map_or(1, |entry| entry.visit_count.max(1).saturating_add(1));
                 self.profile.history.retain(|entry| entry.url != visit.url);
                 self.profile.history.insert(0, visit);
                 self.profile.history.truncate(1000);

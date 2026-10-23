@@ -305,3 +305,15 @@ The subsequent [CI corrections and continued work](ui-ux-implementation.md#ci-co
 track the missing Docker build script, chooser coverage gaps and macOS navigation
 race separately from the remaining platform/device validation. New-tab keyboard
 focus and Windows associated-file path handling are included in this follow-up.
+
+
+### Subsequent remaining-work follow-up
+
+The CI corrections were committed as `6256600` before further work. The next
+follow-up adds persisted most-visited shortcut ranking and macOS URL/HTML bundle
+associations and launch-event delivery. It also fixes the pinned Servo Rc/Box
+allocation mismatch behind the Linux Memory crash; the fresh Linux ARM64 toolbox
+and runtime/shell regressions now pass. See the latest
+[implementation checkpoint](ui-ux-implementation.md#allocation-reports-and-remaining-ui-work--23-october-2026)
+for final validation and outstanding device, Windows and release work. This does
+not mark the entire second-pass proposal complete.

@@ -358,6 +358,7 @@ impl Browser {
             title: "Coverage library fixture".into(),
             url: "http://127.0.0.1/coverage-history".into(),
             visited_at: chrono::Utc::now().timestamp() as u64,
+            visit_count: 0,
         }));
         self.chrome.show_history = true;
         self.chrome.show_bookmarks = false;

@@ -8390,8 +8390,6 @@ dependencies = [
 [[package]]
 name = "servo-script-bindings"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b850dc804d54cd052dbc5cd63b2772a74d9472f12871d5a5ef3b4fae5194dfbd"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.2",
@@ -10547,6 +10545,7 @@ dependencies = [
  "servo",
  "servo-base",
  "servo-devtools-traits",
+ "servo-malloc-size-of",
  "url",
  "webdriver",
  "winit",
