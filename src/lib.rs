@@ -1,4 +1,4 @@
-//! Lotse core and application services. The default-free build has no Servo or GPU dependency.
+//! Wega core and application services. The default-free build has no Servo or GPU dependency.
 #![forbid(unsafe_code)]
 pub mod downloads;
 pub mod model;
@@ -11,6 +11,8 @@ pub mod theme {
     pub use crate::model::{Palette, install, palette};
 }
 pub mod application;
+pub mod base64_text;
 pub mod deadline;
+pub mod lifecycle;
 pub mod navigation;
 pub mod permissions;

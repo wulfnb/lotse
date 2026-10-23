@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wega Third-Party Notices</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.5; max-width: 960px; margin: 0 auto; padding: 24px 16px; color: #0f172a; background: #ffffff; }
+    h1, h2, h3 { line-height: 1.25; }
+    pre { white-space: pre-wrap; background: #f1f5f9; padding: 12px; border-radius: 6px; font-size: .85rem; overflow-wrap: anywhere; }
+    .license { border-top: 1px solid #cbd5e1; padding-top: 12px; margin-top: 24px; }
+    ul.used-by { columns: 2; font-size: .9rem; }
+    @media (max-width: 640px) { ul.used-by { columns: 1; } }
+  </style>
+</head>
+<body>
+  <h1>Wega Browser: Third-Party Notices</h1>
+  <p>Wega is licensed under the Mozilla Public License 2.0 (see <code>LICENSE</code> and
+  <code>NOTICE</code> shipped beside this file). It is built from the Rust crates listed
+  below, each used under the license shown. Source for every crate is available from
+  <a href="https://crates.io/">crates.io</a> or the linked repository; Wega's own source,
+  including the modified Servo and epaint copies under <code>vendor/</code>, is at
+  <a href="https://github.com/wulfnb/wega">github.com/wulfnb/wega</a>.</p>
+
+  <h2>Bundled fonts</h2>
+  <p>The user interface toolkit (egui, crate <code>epaint_default_fonts</code>) compiles
+  these fonts into the executable. Their full license texts appear in the
+  <code>epaint_default_fonts</code> entries below.</p>
+  <ul>
+    <li><strong>Ubuntu Light</strong> (<code>Ubuntu-Light.ttf</code>): Ubuntu Font Licence 1.0.</li>
+    <li><strong>Noto Emoji</strong> (<code>NotoEmoji-Regular.ttf</code>): SIL Open Font License 1.1.</li>
+    <li><strong>Hack</strong> (<code>Hack-Regular.ttf</code>): MIT License (Copyright 2018 Source Foundry
+      Authors); glyphs derived from Bitstream Vera under the Bitstream Vera License; DejaVu
+      changes are in the public domain.</li>
+    <li><strong>emoji-icon-font / egui-icons</strong>: MIT License (Copyright 2014 John Slegers).</li>
+  </ul>
+
+  <h2>Overview of licenses</h2>
+  <ul>
+    {{#each overview}}
+    <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
+    {{/each}}
+  </ul>
+
+  <h2>License texts</h2>
+  {{#each licenses}}
+  <section class="license">
+    <h3 id="{{id}}">{{name}}</h3>
+    <p>Used by:</p>
+    <ul class="used-by">
+      {{#each used_by}}
+      <li><a href="{{#if crate.repository}}{{crate.repository}}{{else}}https://crates.io/crates/{{crate.name}}{{/if}}">{{crate.name}} {{crate.version}}</a></li>
+      {{/each}}
+    </ul>
+    <pre>{{text}}</pre>
+  </section>
+  {{/each}}
+</body>
+</html>

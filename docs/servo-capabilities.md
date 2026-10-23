@@ -9,7 +9,7 @@ The default build remains WebRender/GL. The presence of a delegate method or Car
 | Web notifications | WebView and worker delegates submit through macOS UserNotifications after OS authorization. Site permission remains separate. Requires `.app` identity. Delivery, OS UI, notification actions and click callbacks have not been integration tested. |
 | Navigation rules/external apps | Configurable host allow/block rules, domain-boundary matching, confirmation before opening mailto/tel/sms/zoommtg in macOS. Host restrictions are not a secure kiosk mode. |
 | Request interception | Real HTTP/HTTPS interception blocks configured hosts and offline requests, including subresources. This is a host blocker, not an Adblock filter-list implementation. Arbitrary outgoing header mutation is not exposed by this hook. |
-| Internal pages | Registered unprivileged `lotse://newtab`, `history`, `bookmarks`, `settings` protocol. History/bookmark HTML is escaped and served with a restrictive CSP. Native settings are in the browser menu. |
+| Internal pages | Registered unprivileged `wega://newtab`, `history`, `bookmarks`, `settings` protocol. History/bookmark HTML is escaped and served with a restrictive CSP. Native settings are in the browser menu. |
 | Protocol registration | Approval consumes Servo's registration responder; approved schemes navigate through Servo. Registrations last for this browser process. |
 | Screen geometry | Monitor size and actual outer window bounds; macOS available area excludes system UI via NSScreen.visibleFrame. |
 | Popup move/resize | Opt-in window changes; resize bounded to monitor size. Popups still use browser tabs rather than independent popup windows. |
@@ -36,20 +36,20 @@ The default build remains WebRender/GL. The presence of a delegate method or Car
 | Brotli streams | Enabled in the default Cargo build. |
 | Vello | Outstanding experimental canvas backend profile. In Servo 0.7 this flag reaches servo-canvas/vello and the dom_canvas_backend preference; it does not replace the page compositor. Production stays on WebRender. |
 | Download manager | Implemented: page download links, link/image context menus, URL entry, four parallel connections by default (configurable 1–8), validated range responses with single-connection fallback, pause/resume/cancel/retry, and atomic publication of completed files. Site cookies are reused. The web viewer exposes authenticated downloads from the configured host directory. Active jobs do not resume after browser restart. |
-| Website password manager | Outstanding. The web viewer's encrypted account settings authenticate access to Lotse; they do not save website passwords or provide autofill. |
+| Website password manager | Outstanding. The web viewer's encrypted account settings authenticate access to Wega; they do not save website passwords or provide autofill. |
 | Find in page | Native find controls use DOM ranges, next/previous, wrap and selected-match feedback. Search caps at 50,000 text nodes/10,000 matches; does not join text across separate nodes. |
 | Session restore/settings | URL/session restore and native persisted settings exist. Web viewer account names and password-verifier records are encrypted at rest; password verification uses salted scrypt. Full page-state recovery, website password storage, printing and DRM are not provided. |
 
 ## Running
 
 ```sh
-cargo run --locked -- --profile-dir /tmp/servo-personal
-cargo run --locked -- --profile-dir /tmp/servo-remote --remote-devtools 7000
-cargo run --locked -- --profile-dir /tmp/servo-automation --webdriver-port 7001
-cargo run --locked --features multiprocess -- --profile-dir /tmp/servo-processes --multiprocess
+cargo run --locked -- --profile-dir /tmp/wega-personal
+cargo run --locked -- --profile-dir /tmp/wega-remote --remote-devtools 7000
+cargo run --locked -- --profile-dir /tmp/wega-automation --webdriver-port 7001
+cargo run --locked --features multiprocess -- --profile-dir /tmp/wega-processes --multiprocess
 ```
 
-Remote tools and WebDriver are off by default. The server binds only loopback. Use a separate profile for automation. The WebDriver bridge reports the `lotse` browser name and accepts both `lotse` and the legacy `servo` capability name, normal page load strategy and a fixed 30-second command deadline. Element arguments and unsupported commands are rejected. Existing cookies, storage and tabs in the selected profile remain accessible to automation.
+Remote tools and WebDriver are off by default. The server binds only loopback. Use a separate profile for automation. The WebDriver bridge reports the `wega` browser name, normal page load strategy and a fixed 30-second command deadline. Element arguments and unsupported commands are rejected. Existing cookies, storage and tabs in the selected profile remain accessible to automation.
 
 ## Native integration test
 
@@ -58,7 +58,7 @@ Run the HTTP fixture, then use a fresh isolated profile:
 ```sh
 python3 tests/network_server.py 8767
 # In another terminal:
-cargo run --locked --features test-harness -- --capabilities-test --profile-dir /tmp/servo-capability-test
+cargo run --locked --features test-harness -- --capabilities-test --profile-dir /tmp/wega-capability-test
 ```
 
 The test exercises scripts, screen metrics, engine cookies/storage deletion, DOM-range find, reader mode, offline interception, internal history, screenshot saving and pinch zoom. It does not grant OS notifications, connect physical devices or claim media backend coverage.
@@ -70,7 +70,7 @@ The default build requires Rust 1.95+ and a GStreamer 1.20+ development SDK. On 
 ```sh
 brew install pkgconf gstreamer libnice-gstreamer
 scripts/package-macos.sh --debug
-python3 tests/media_smoke.py 'target/Lotse.app/Contents/MacOS/servo-browser'
+python3 tests/media_smoke.py 'target/Wega.app/Contents/MacOS/wega'
 ```
 
 `--no-default-features --features brotli-streams` builds without media; the packaging equivalent is `scripts/package-macos.sh --debug --no-media`. The media packager copies libraries before rewriting their install names and ad-hoc signing the copies. Installed SDK libraries remain untouched. Each profile keeps its GStreamer registry under `engine/`, and startup loads Servo's explicit plugin list rather than scanning unrelated SDK plugins. Physical-device APIs and DRM are outside this playback test.

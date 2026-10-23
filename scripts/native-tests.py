@@ -24,7 +24,7 @@ def load(name, path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--binary', default=str(root / 'target/debug/servo-browser'))
+    parser.add_argument('--binary', default=str(root / 'target/debug/wega'))
     parser.add_argument('--output', default=str(root / 'target/native-tests'))
     parser.add_argument('--suite', choices=['all', 'smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media', 'capture'], nargs='+', default=['all'])
     args = parser.parse_args()
@@ -36,7 +36,7 @@ def main():
     for suite in ['smoke', 'theme', 'capabilities', 'toolbox', 'download', 'webdriver', 'media', 'capture']:
         if 'all' not in args.suite and suite not in args.suite:
             continue
-        module = load(f'lotse_{suite}_fixture', root / 'tests' / ('download_server.py' if suite == 'download' else 'network_server.py'))
+        module = load(f'wega_{suite}_fixture', root / 'tests' / ('download_server.py' if suite == 'download' else 'network_server.py'))
         server = ThreadingHTTPServer(('127.0.0.1', 0), module.Handler)
         # Exercise reloads slower than the smoke driver's former 650ms wait.
         if suite == 'smoke':
@@ -48,7 +48,7 @@ def main():
         command = [str(Path(args.binary).resolve()), f'--{suite}-test', '--profile-dir', str(profile), f'http://127.0.0.1:{server.server_port}/{fixture}']
         environment = os.environ.copy()
         if suite in ('webdriver', 'media'):
-            environment.update(LOTSE_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}', LOTSE_TEST_OUTPUT=str(output))
+            environment.update(WEGA_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}', WEGA_TEST_OUTPUT=str(output))
             command = [sys.executable, str(root / 'tests' / ('webdriver_smoke.py' if suite == 'webdriver' else 'media_smoke.py')), str(Path(args.binary).resolve())]
         if suite == 'capture':
             command = [str(Path(args.binary).resolve()), '--profile-dir', str(profile), '--capture', str(profile / 'page.png'), f'http://127.0.0.1:{server.server_port}/capabilities.html']

@@ -91,12 +91,10 @@ impl Application {
                 self.profile.history.truncate(1000);
             }
             Command::Favicon { url, image } => {
-                if image.width == 0
-                    || image.height == 0
-                    || image.width > 32
-                    || image.height > 32
-                    || image.rgba.len() != image.width * image.height * 4
-                {
+                if !image.valid(32) {
+                    return Event::Unchanged;
+                }
+                if self.profile.favicons.get(&url) == Some(&image) {
                     return Event::Unchanged;
                 }
                 if self.profile.favicons.len() >= 128 && !self.profile.favicons.contains_key(&url) {
@@ -123,25 +121,35 @@ impl Application {
     }
     /// Preserve selection by identity when non-persistable data tabs are removed.
     pub fn save_session(&mut self, urls: Vec<String>, active: usize) -> Result<(), String> {
+        self.save_tabs(
+            urls.into_iter().map(|url| (url, String::new())).collect(),
+            active,
+        )
+    }
+    /// Persist the open tabs as (url, title) pairs. Titles let unloaded tabs show
+    /// their page name after a restart without loading the page.
+    pub fn save_tabs(&mut self, tabs: Vec<(String, String)>, active: usize) -> Result<(), String> {
         if !self.writable {
             return Err(
                 "Profile has not loaded successfully; existing data will not be overwritten".into(),
             );
         }
-        let selected = urls
+        let selected = tabs
             .iter()
             .take(active)
-            .filter(|url| !url.starts_with("data:"))
+            .filter(|(url, _)| !url.starts_with("data:"))
             .count();
-        let new_urls: Vec<String> = urls
+        let (new_urls, new_titles): (Vec<String>, Vec<String>) = tabs
             .into_iter()
-            .filter(|url| !url.starts_with("data:"))
-            .collect();
+            .filter(|(url, _)| !url.starts_with("data:"))
+            .unzip();
         let new_active = selected.min(new_urls.len().saturating_sub(1));
         let previous_urls = std::mem::replace(&mut self.profile.urls, new_urls);
+        let previous_titles = std::mem::replace(&mut self.profile.titles, new_titles);
         let previous_active = std::mem::replace(&mut self.profile.active, new_active);
         if let Err(error) = self.store.save(&self.profile) {
             self.profile.urls = previous_urls;
+            self.profile.titles = previous_titles;
             self.profile.active = previous_active;
             return Err(error);
         }

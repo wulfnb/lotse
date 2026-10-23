@@ -13,11 +13,7 @@
   ],
   "test_only": [
     "src/*_tests.rs",
-    "src/smoke.rs",
-    "src/download_test.rs",
-    "src/theme_test.rs",
-    "src/capabilities_test.rs",
-    "src/toolbox_test.rs",
+    "src/harness/*.rs",
     "scripts/native-tests.py",
     "scripts/docker-auth-test.py",
     "scripts/docker-*-test.sh",

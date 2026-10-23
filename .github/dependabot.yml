@@ -1,0 +1,11 @@
+# Keep the commit-SHA-pinned GitHub Actions current. Dependabot rewrites both the
+# SHA and the trailing `# vX.Y.Z` comment; review each bump before merging.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]

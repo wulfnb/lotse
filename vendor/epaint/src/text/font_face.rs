@@ -1,3 +1,7 @@
+// Modified by Wega contributors, 2026: glyph rasterization contexts are created
+// explicitly single-threaded (`num_threads: 0`). See vendor/README.md.
+// epaint is licensed under MIT OR Apache-2.0; see LICENSE-MIT and LICENSE-APACHE.
+
 #![expect(clippy::mem_forget)]
 
 #[cfg(feature = "color_fonts")]

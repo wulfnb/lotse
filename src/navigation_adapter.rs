@@ -1,5 +1,5 @@
 //! Servo adapter for the engine-independent navigation port.
-use servo_browser::navigation::NavigationPort;
+use wega::navigation::NavigationPort;
 pub(crate) struct Navigation<'a> {
     pub view: &'a servo::WebView,
     pub traversals: &'a mut std::collections::HashMap<servo::WebViewId, servo::TraversalId>,

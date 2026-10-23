@@ -43,14 +43,14 @@ impl Browser {
                 self.accessibility.active = true;
                 self.accessibility.grafted = None;
                 self.gui.as_ref().unwrap().egui_ctx.enable_accesskit();
-                self.tab().view.set_accessibility_active(false);
-                self.tab().view.set_accessibility_active(true);
+                self.view().set_accessibility_active(false);
+                self.view().set_accessibility_active(true);
             }
             WindowEvent::ActionRequested(request) => {
                 if request.target_tree == accesskit::TreeId::ROOT {
                     self.chrome.page_focused = request.target_node
                         == egui::Id::unique("web-page-accessibility").accesskit_id();
-                    self.tab().view.set_focused(self.chrome.page_focused);
+                    self.view().set_focused(self.chrome.page_focused);
                     self.gui
                         .as_mut()
                         .unwrap()
@@ -72,8 +72,13 @@ impl Browser {
             }
             WindowEvent::AccessibilityDeactivated => {
                 self.accessibility = State::default();
-                for tab in self.session().tabs() {
-                    tab.view.set_accessibility_active(false);
+                for view in self
+                    .session()
+                    .tabs()
+                    .iter()
+                    .filter_map(crate::browser::Tab::view)
+                {
+                    view.set_accessibility_active(false);
                 }
             }
         }
@@ -83,7 +88,7 @@ impl Browser {
         if !self.accessibility.active {
             return;
         }
-        let view = self.tab().view.clone();
+        let view = self.view().clone();
         if self.accessibility.grafted != Some(view.id()) {
             // Removing a native graft removes its subtree. Revisiting a tab
             // therefore needs a fresh full tree, not incremental stale nodes.

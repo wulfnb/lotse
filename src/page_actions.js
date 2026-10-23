@@ -16,12 +16,12 @@
         }
     }
     if (!matches.length) return 'No matches';
-    const last = window.__servoBrowserFind;
+    const last = window.__wegaBrowserFind;
     const index = last && last.query === query ? (last.index + (backwards ? -1 : 1) + matches.length) % matches.length : (backwards ? matches.length - 1 : 0);
     const [text, offset] = matches[index], range = document.createRange();
     range.setStart(text, offset); range.setEnd(text, offset + query.length);
     const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
     text.parentElement.scrollIntoView({block:'center'});
-    window.__servoBrowserFind = {query,index};
+    window.__wegaBrowserFind = {query,index};
     return (index + 1) + ' of ' + matches.length + (count >= 50000 ? ' (search limit reached)' : '');
 })(QUERY, BACKWARDS)

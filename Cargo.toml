@@ -1,10 +1,12 @@
 [package]
-name = "servo-browser"
+name = "wega"
 version = "0.1.0-alpha.1"
 edition = "2024"
-rust-version = "1.95"
-description = "Lotse — a native Rust browser powered by Servo, with movable tabs"
+rust-version = "1.98"
+description = "Wega — a native Rust browser powered by Servo, with movable tabs"
 license = "MPL-2.0"
+repository = "https://github.com/wulfnb/wega"
+publish = false
 
 [features]
 default = ["desktop", "brotli-streams", "media"]
@@ -15,7 +17,7 @@ multiprocess = ["desktop", "servo/multiprocess"]
 media = ["desktop", "servo/media-gstreamer"]
 
 [[bin]]
-name = "servo-browser"
+name = "wega"
 path = "src/main.rs"
 required-features = ["desktop"]
 

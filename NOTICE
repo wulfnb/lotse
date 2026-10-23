@@ -1,0 +1,29 @@
+Wega Browser — Copyright 2026 Noufal Babu A S and contributors
+
+Wega is licensed under the Mozilla Public License, Version 2.0 (MPL-2.0); see
+the LICENSE file or https://mozilla.org/MPL/2.0/. The complete source code is
+available at https://github.com/wulfnb/wega. Binary distributions record the
+exact source commit they were built from at the end of this file.
+
+Servo
+Wega embeds the Servo web engine (https://servo.org/), used under MPL-2.0.
+The vendor/ directory of the source repository contains modified copies of
+the Servo 0.7.0 crate (MPL-2.0) and the epaint 0.37.0 crate (MIT OR
+Apache-2.0). Each modified file is marked, and vendor/README.md describes the
+changes. Licenses of all other third-party components are listed in
+THIRD-PARTY-NOTICES.html, distributed with every binary.
+
+Trademarks
+Servo is a trademark of the Linux Foundation. Wega is an independent project
+and is not affiliated with or endorsed by the Linux Foundation or Mozilla.
+
+Warranty and liability
+This software is provided free of charge and "as is", without warranty of any
+kind, as set out in sections 6 and 7 of the MPL-2.0. Where German law applies,
+the developers and contributors are liable, pursuant to § 521 of the German
+Civil Code (BGB), only for intent (Vorsatz) and gross negligence (grobe
+Fahrlässigkeit).
+
+Haftung
+Diese Software wird unentgeltlich überlassen. Gemäß § 521 BGB haften die
+Entwickler und Mitwirkenden nur für Vorsatz und grobe Fahrlässigkeit.

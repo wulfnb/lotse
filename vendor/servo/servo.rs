@@ -2,6 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+// Modified by Wega contributors, 2026: GStreamer plugin-directory discovery for
+// unbundled macOS builds and the `ServoBuilder::devtools_event_sender` embedder
+// hook for native developer tools. See vendor/README.md.
+
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::cmp::max;
 use std::rc::{Rc, Weak};

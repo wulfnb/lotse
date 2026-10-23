@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lotse Browser — Native Rust Browser powered by Servo</title>
-  <meta name="description" content="Lotse is a native Rust desktop browser engineered in Germany that embeds the open-source Servo 0.7.0 web engine. Features movable tabs, AppKit vibrancy, and multi-platform packaging.">
+  <title>Wega Browser — Native Rust Browser powered by Servo</title>
+  <meta name="description" content="Wega is a native Rust desktop browser engineered in Germany that embeds the open-source Servo 0.7.0 web engine. Features movable tabs, AppKit vibrancy, and multi-platform packaging.">
   <link rel="icon" type="image/png" href="favicon.png">
   <style>
     :root {
@@ -385,8 +385,8 @@
   <header>
     <div class="container nav-wrapper">
       <a href="#" class="brand">
-        <img src="logo.png" alt="Lotse Logo">
-        <span>Lotse</span>
+        <img src="logo.png" alt="Wega Logo">
+        <span>Wega</span>
         <span class="badge">v0.1.0-alpha.1</span>
       </a>
       <details class="mobile-menu">
@@ -394,16 +394,16 @@
         <nav aria-label="Mobile navigation">
           <a href="#downloads">Downloads</a><a href="#features">Features</a>
           <a href="#docker">Docker</a><a href="#disclaimer">Alpha notice</a>
-          <a href="https://github.com/wulfnb/lotse">GitHub repository</a>
+          <a href="https://github.com/wulfnb/wega">GitHub repository</a>
         </nav>
       </details>
       <div class="nav-links">
-        <a href="#motivation">Why Lotse?</a>
+        <a href="#motivation">Why Wega?</a>
         <a href="#features">Features</a>
         <a href="#docker">Docker</a>
         <a href="#downloads">Downloads</a>
         <a href="#disclaimer">Legal</a>
-        <a href="https://github.com/wulfnb/lotse" class="btn-github" target="_blank" rel="noopener">
+        <a href="https://github.com/wulfnb/wega" class="btn-github" target="_blank" rel="noopener">
           <svg height="18" width="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           GitHub
         </a>
@@ -415,21 +415,21 @@
     <section class="hero">
       <h1>A Native Rust Browser<br>Powered by Servo</h1>
       <p>
-        Lotse is an independent desktop browser engineered in Germany that embeds the open-source <strong>Servo 0.7.0</strong> engine. Built with movable tabs, AppKit vibrancy, and zero unsafe code in its core.
+        Wega is an independent desktop browser engineered in Germany that embeds the open-source <strong>Servo 0.7.0</strong> engine. Built with movable tabs, AppKit vibrancy, and zero unsafe code in its core.
       </p>
 
-      <div class="download-grid" id="downloads" aria-label="Download Lotse Alpha Preview">
-        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg" class="btn-primary">
+      <div class="download-grid" id="downloads" aria-label="Download Wega Alpha Preview">
+        <a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-macOS-arm64.dmg" class="btn-primary">
           Download for macOS · Apple Silicon
         </a>
-        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip" class="btn-primary">
+        <a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Windows-x64.zip" class="btn-primary">
           Download for Windows · x64
         </a>
-        <a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz" class="btn-primary">
+        <a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Linux-x86_64.tar.gz" class="btn-primary">
           Download for Linux · x86_64
         </a>
         <a href="#docker" class="btn-secondary">Run in Docker</a>
-        <a href="https://github.com/wulfnb/lotse/releases" class="btn-secondary" target="_blank" rel="noopener">All releases &amp; checksums</a>
+        <a href="https://github.com/wulfnb/wega/releases" class="btn-secondary" target="_blank" rel="noopener">All releases &amp; checksums</a>
       </div>
 
       <p class="copy-status" id="copy-status" role="status" aria-live="polite"></p>
@@ -443,26 +443,27 @@
         </div>
         <div class="terminal-body" id="docker-command" tabindex="0" aria-label="Docker launch command">
           <span class="cmd">docker run</span> -d \<br>
-          &nbsp;&nbsp;--name lotse-browser \<br>
-          &nbsp;&nbsp;-p 7443:7443 \<br>
+          &nbsp;&nbsp;--name wega-browser \<br>
+          &nbsp;&nbsp;-p 127.0.0.1:7443:7443 \<br>
           &nbsp;&nbsp;-e BROWSER_USER=servo \<br>
           &nbsp;&nbsp;-e BROWSER_PASSWORD=<span style="color: #f59e0b;">'choose-a-strong-password'</span> \<br>
-          &nbsp;&nbsp;-v lotse-profile:/config \<br>
-          &nbsp;&nbsp;ghcr.io/wulfnb/lotse:latest<br><br>
-          <span style="color: #64748b;"># Open https://localhost:7443 and sign in as servo with your chosen password.</span>
+          &nbsp;&nbsp;-v wega-profile:/config \<br>
+          &nbsp;&nbsp;ghcr.io/wulfnb/wega:latest<br><br>
+          <span style="color: #64748b;"># Open https://localhost:7443 and sign in as servo with your chosen password.</span><br>
+          <span style="color: #64748b;"># Never expose port 7443 to the internet; use Tailscale/WireGuard or a trusted reverse proxy.</span>
         </div>
       </div>
     </section>
 
     <section id="motivation" style="margin-bottom: 80px;">
-      <h2 class="section-title">Why Lotse?</h2>
+      <h2 class="section-title">Why Wega?</h2>
       <p class="section-subtitle">Born out of the frustration with RAM-heavy corporate browsers and the dream of turning Servo into a daily driver.</p>
 
       <div class="features-grid">
         <div class="card">
           <div class="card-icon">🚀</div>
           <h3>A Real Servo Browser</h3>
-          <p>For years, the revolutionary Servo engine existed primarily as an embedded research library. Lotse brings it to life as a complete, usable browser with draggable tabs, bookmarks, and developer tools.</p>
+          <p>For years, the revolutionary Servo engine existed primarily as an embedded research library. Wega brings it to life as a complete, usable browser with draggable tabs, bookmarks, and developer tools.</p>
         </div>
         <div class="card">
           <div class="card-icon">🏠</div>
@@ -477,7 +478,7 @@
         <div class="card">
           <div class="card-icon">🌐</div>
           <h3>Breaking the Monoculture</h3>
-          <p>With almost every browser now running on Google's Blink/Chromium engine, web standards risk being dictated by a single advertising giant. Lotse keeps the open web diverse by championing Servo.</p>
+          <p>With almost every browser now running on Google's Blink/Chromium engine, web standards risk being dictated by a single advertising giant. Wega keeps the open web diverse by championing Servo.</p>
         </div>
         <div class="card">
           <div class="card-icon">🔒</div>
@@ -486,15 +487,15 @@
         </div>
         <div class="card">
           <div class="card-icon">🛡️</div>
-          <h3>Memory Safety by Design</h3>
-          <p>Over 70% of historical browser exploits trace back to C/C++ memory corruption. Lotse leverages Rust's strict compile-time safety and <code>#![forbid(unsafe_code)]</code> to eliminate whole vulnerability classes.</p>
+          <h3>Rust-First Memory Safety</h3>
+          <p>Many browser exploits trace back to C/C++ memory corruption. Wega's own code is Rust, its core library forbids <code>unsafe</code>, and the desktop app keeps a few small, reviewed <code>unsafe</code> blocks. The engine still includes SpiderMonkey (C++ with a JIT) and GStreamer and runs in one process by default, so memory safety is not end-to-end.</p>
         </div>
       </div>
     </section>
 
     <section id="features">
       <h2 class="section-title">Built for Performance and Modularity</h2>
-      <p class="section-subtitle">Lotse strictly separates presentation, session transitions, and engine handles through Hexagonal Ports & Adapters.</p>
+      <p class="section-subtitle">Wega strictly separates presentation, session transitions, and engine handles through Hexagonal Ports & Adapters.</p>
 
       <div class="features-grid">
         <div class="card">
@@ -515,7 +516,7 @@
         <div class="card">
           <div class="card-icon">🍎</div>
           <h3>Native AppKit Integration</h3>
-          <p>Under macOS, Lotse embeds native <code>NSVisualEffectView</code> vibrancy behind the render layer, bridges Control Center media keys, and connects with <code>UNUserNotificationCenter</code>.</p>
+          <p>Under macOS, Wega embeds native <code>NSVisualEffectView</code> vibrancy behind the render layer, bridges Control Center media keys, and connects with <code>UNUserNotificationCenter</code>.</p>
         </div>
         <div class="card">
           <div class="card-icon">⬇️</div>
@@ -533,9 +534,9 @@
     <section class="notice-box" id="disclaimer">
       <h4>⚠️ Alpha Test Notice & Haftungsausschluss (§ 521 BGB)</h4>
       <p><strong>This is an experimental Alpha release (v0.1.0-alpha.1) provided free of charge for developer testing and technical evaluation.</strong></p>
-      <p>Lotse embeds the Servo engine, which is under active open-source development and does not yet implement all web security standards or sandboxing mechanisms present in mature commercial browsers. <strong>Do not use Lotse for security-sensitive activities such as online banking or accessing critical confidential accounts.</strong></p>
+      <p>Wega embeds the Servo engine, which is under active open-source development and does not yet implement all web security standards or sandboxing mechanisms present in mature commercial browsers. <strong>Do not use Wega for security-sensitive activities such as online banking or accessing critical confidential accounts.</strong></p>
       <p>Pursuant to § 521 of the German Civil Code (BGB), liability of the developers and contributors for software provided free of charge is limited to cases of intent (<em>Vorsatz</em>) and gross negligence (<em>grobe Fahrlässigkeit</em>).</p>
-      <p><em>Servo is a registered trademark of the Linux Foundation. Lotse is an independent open-source project and is not affiliated with or endorsed by the Linux Foundation or Mozilla.</em></p>
+      <p><em>Servo is a trademark of the Linux Foundation. Wega is an independent open-source project and is not affiliated with or endorsed by the Linux Foundation or Mozilla.</em></p>
     </section>
   </main>
 
@@ -543,7 +544,7 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-col">
-          <h5>Lotse Browser</h5>
+          <h5>Wega Browser</h5>
           <p style="color: var(--text-muted); font-size: 0.85rem; max-width: 280px; margin-top: 8px;">
             Engineered in Germany.<br>
             Powered by the open-source Servo web engine and Rust.
@@ -552,24 +553,32 @@
         <div class="footer-col">
           <h5>Downloads</h5>
           <ul>
-            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg" target="_blank" rel="noopener">macOS (Apple Silicon .dmg)</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz" target="_blank" rel="noopener">Linux (x86_64 .tar.gz)</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip" target="_blank" rel="noopener">Windows (x64 .zip)</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/pkgs/container/lotse" target="_blank" rel="noopener">Docker Image (GHCR)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-macOS-arm64.dmg" target="_blank" rel="noopener">macOS (Apple Silicon .dmg)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Linux-x86_64.tar.gz" target="_blank" rel="noopener">Linux (x86_64 .tar.gz)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Windows-x64.zip" target="_blank" rel="noopener">Windows (x64 .zip)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/pkgs/container/wega" target="_blank" rel="noopener">Docker Image (GHCR)</a></li>
           </ul>
         </div>
         <div class="footer-col">
           <h5>Architecture & Docs</h5>
           <ul>
-            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture Specification</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/architecture-decisions.md" target="_blank" rel="noopener">Decision Records (ADR)</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/blob/main/docs/docker.md" target="_blank" rel="noopener">Docker Viewer Guide</a></li>
-            <li><a href="https://github.com/wulfnb/lotse/blob/main/LICENSE" target="_blank" rel="noopener">License (MPL-2.0)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture Specification</a></li>
+            <li><a href="https://github.com/wulfnb/wega/blob/main/docs/architecture-decisions.md" target="_blank" rel="noopener">Decision Records (ADR)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/blob/main/docs/docker.md" target="_blank" rel="noopener">Docker Viewer Guide</a></li>
+            <li><a href="https://github.com/wulfnb/wega/blob/main/LICENSE" target="_blank" rel="noopener">License (MPL-2.0)</a></li>
+            <li><a href="https://github.com/wulfnb/wega/blob/main/NOTICE" target="_blank" rel="noopener">Notice &amp; attributions</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h5>Legal</h5>
+          <ul>
+            <li><a href="impressum.html">Impressum</a></li>
+            <li><a href="impressum.html#datenschutz">Datenschutz / Privacy</a></li>
           </ul>
         </div>
       </div>
       <div class="copyright">
-        &copy; 2026 Lotse Browser Project. Released under the <a href="https://github.com/wulfnb/lotse/blob/main/LICENSE" style="color: var(--accent-light); text-decoration: none;">Mozilla Public License 2.0</a>.
+        &copy; 2026 Noufal Babu A S and contributors. Released under the <a href="https://github.com/wulfnb/wega/blob/main/LICENSE" style="color: var(--accent-light); text-decoration: none;">Mozilla Public License 2.0</a>.
       </div>
     </div>
   </footer>

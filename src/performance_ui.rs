@@ -17,9 +17,9 @@ pub struct State {
 }
 
 pub const START: &str = r#"
-if(globalThis.__servoPerfRecording?.running)throw Error('A recording is already running');
+if(globalThis.__wegaPerfRecording?.running)throw Error('A recording is already running');
 const capture={running:true,start:performance.now(),end:null,frames:[],entries:[],truncated:false};
-globalThis.__servoPerfRecording=capture;
+globalThis.__wegaPerfRecording=capture;
 if(typeof PerformanceObserver!=='undefined'){
  try{capture.observer=new PerformanceObserver(list=>{for(const e of list.getEntries()){if(capture.entries.length<2000)capture.entries.push(e.toJSON());else capture.truncated=true;}});
  capture.observer.observe({entryTypes:['resource','mark','measure','paint','longtask']});}catch(e){capture.observerError=String(e);}
@@ -28,7 +28,7 @@ function frame(time){if(!capture.running)return;if(capture.frames.length<3600)ca
 capture.raf=requestAnimationFrame(frame);
 "#;
 pub const STOP: &str = r#"
-const capture=globalThis.__servoPerfRecording;
+const capture=globalThis.__wegaPerfRecording;
 if(capture){capture.running=false;capture.end=performance.now();cancelAnimationFrame(capture.raf);if(capture.observer){for(const e of capture.observer.takeRecords()){if(capture.entries.length<2000)capture.entries.push(e.toJSON());else capture.truncated=true;}capture.observer.disconnect();}}
 "#;
 

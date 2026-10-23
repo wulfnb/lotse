@@ -11,8 +11,8 @@ import time
 import urllib.request
 import urllib.error
 
-binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/servo-browser').resolve())
-profile = Path(tempfile.mkdtemp(prefix='servo-media-', dir=os.environ.get('LOTSE_TEST_OUTPUT')))
+binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/wega').resolve())
+profile = Path(tempfile.mkdtemp(prefix='wega-media-', dir=os.environ.get('WEGA_TEST_OUTPUT')))
 with socket.socket() as listener:
     listener.bind(('127.0.0.1', 0))
     port = listener.getsockname()[1]
@@ -26,7 +26,7 @@ def request(method,path,body=None):
     except urllib.error.HTTPError as error:
         raise AssertionError(error.read().decode()) from error
 with (profile/'browser.log').open('w') as log:
-    process=subprocess.Popen([binary,'--profile-dir',str(profile),'--webdriver-port',str(port),'servo://newtab'],stdout=log,stderr=log)
+    process=subprocess.Popen([binary,'--profile-dir',str(profile),'--webdriver-port',str(port),'wega://newtab'],stdout=log,stderr=log)
     try:
         deadline=time.monotonic()+30
         while True:
@@ -39,9 +39,9 @@ with (profile/'browser.log').open('w') as log:
             except OSError:
                 if time.monotonic()>deadline or process.poll() is not None:raise RuntimeError((profile/'browser.log').read_text())
                 time.sleep(.2)
-        session=request('POST','/session',{'capabilities':{'alwaysMatch':{'browserName':'servo'}}})['sessionId']
+        session=request('POST','/session',{'capabilities':{'alwaysMatch':{'browserName':'wega'}}})['sessionId']
         root=f'/session/{session}'
-        request('POST',root+'/url',{'url':os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767') + '/media.html'})
+        request('POST',root+'/url',{'url':os.environ.get('WEGA_FIXTURE_URL', 'http://127.0.0.1:8767') + '/media.html'})
         deadline=time.monotonic()+25
         while True:
             result=request('POST',root+'/execute/sync',{'script':'return window.mediaReport','args':[]})

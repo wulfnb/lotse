@@ -9,7 +9,7 @@ fn malformed_settings_are_normalized_without_panics() {
     };
     profile.favicons.insert(
         "bad".into(),
-        SavedFavicon {
+        SavedFavicon::Rgba {
             width: usize::MAX,
             height: usize::MAX,
             rgba: vec![],
@@ -42,7 +42,7 @@ fn favicon_restoration_is_bounded_and_keeps_valid_pixels() {
     for index in 0..130 {
         profile.favicons.insert(
             format!("{index:03}"),
-            SavedFavicon {
+            SavedFavicon::Rgba {
                 width: 1,
                 height: 1,
                 rgba: vec![0, 1, 2, 255],
@@ -52,5 +52,12 @@ fn favicon_restoration_is_bounded_and_keeps_valid_pixels() {
     profile.normalize();
     assert_eq!(profile.favicons.len(), 128);
     assert!(!profile.favicons.contains_key("000"));
-    assert_eq!(profile.favicons["129"].rgba, [0, 1, 2, 255]);
+    assert_eq!(
+        profile.favicons["129"],
+        SavedFavicon::Rgba {
+            width: 1,
+            height: 1,
+            rgba: vec![0, 1, 2, 255]
+        }
+    );
 }

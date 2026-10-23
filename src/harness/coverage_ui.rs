@@ -28,7 +28,11 @@ impl Browser {
         {
             let mut clicked = false;
             let mut available = Vec::new();
-            for _ in 0..6 {
+            // Automatic egui ids shift when time-dependent UI (e.g. an expiring toast) changes
+            // between frames, so a request is only delivered once the frame that consumed it
+            // still contains the same labelled node; otherwise it is requested again.
+            let mut pending = None;
+            for _ in 0..8 {
                 let mut output = ctx.run_ui(
                     egui::RawInput {
                         screen_rect: Some(egui::Rect::from_min_size(
@@ -57,6 +61,14 @@ impl Browser {
                     .iter()
                     .filter_map(|(_, n)| n.label().map(str::to_owned))
                     .collect();
+                if let Some(target) = pending.take()
+                    && nodes
+                        .iter()
+                        .any(|(id, n)| *id == target && n.label() == Some(label))
+                {
+                    clicked = true;
+                    break;
+                }
                 if let Some((id, _)) = nodes
                     .iter()
                     .find(|(_, n)| n.label() == Some(label) && n.supports_action(action))
@@ -69,8 +81,7 @@ impl Browser {
                             data: None,
                         },
                     ));
-                    clicked = true;
-                    break;
+                    pending = Some(*id);
                 }
             }
             assert!(
@@ -127,7 +138,7 @@ impl Browser {
         self.features.delete_site = Some(origin);
         self.coverage_click(&["Delete site data"], feature);
         assert!(self.features.delete_site.is_none());
-        let owner = crate::network::owner(self.tab().view.id());
+        let owner = crate::network::owner(self.view().id());
         self.coverage_click(&["Options", "Import HAR file…"], |b, ui| {
             b.network_options(ui, &owner)
         });
@@ -216,12 +227,12 @@ impl Browser {
                 "Shortcut {text}"
             );
         };
-        let original = self.tab().view.id();
+        let original = self.view().id();
         let tabs = self.session().tabs().len();
         key(self, "t", command);
         assert_eq!(self.session().tabs().len(), tabs + 1);
         key(self, "1", command);
-        assert_eq!(self.tab().view.id(), original);
+        assert_eq!(self.view().id(), original);
         key(self, "9", command);
         key(self, "w", command);
         assert_eq!(self.session().tabs().len(), tabs);
@@ -294,7 +305,7 @@ impl Browser {
         self.select_tab(0);
         self.select_tab(usize::MAX);
         self.close_tab(usize::MAX);
-        assert_eq!(self.tab().view.id(), original);
+        assert_eq!(self.view().id(), original);
         self.add_tab("http://[");
         assert!(self.status.is_some());
         self.navigate("http://[");
@@ -324,7 +335,7 @@ impl Browser {
         );
     }
     fn check_library_contracts(&mut self) {
-        use servo_browser::application::Command;
+        use wega::application::Command;
         let render = |b: &mut Self, ui: &mut egui::Ui| b.ui(ui);
         self.apply(Command::Visit(crate::profile::Bookmark {
             title: "Coverage library fixture".into(),
@@ -399,7 +410,7 @@ impl Browser {
         self.features.find_open = false;
         self.chrome.focus_address = false;
         self.chrome.page_focused = true;
-        self.tab().view.set_focused(true);
+        self.view().set_focused(true);
         let ctx = egui::Context::default();
         let previous = egui::Id::unique("coverage-dialog-previous-focus");
         ctx.memory_mut(|m| m.request_focus(previous));
@@ -415,7 +426,7 @@ impl Browser {
     pub(crate) fn check_tool_ui_contracts(&mut self) {
         use crate::toolbox::Tool;
         self.select_tab(0);
-        let view = self.tab().view.clone();
+        let view = self.view().clone();
         let owner = crate::network::owner(view.id());
         self.tools.page(&view);
         self.tools.split_console = false;
@@ -502,7 +513,15 @@ impl Browser {
         self.features.diagnostics = false;
         self.tools.active = Tool::Console;
         self.coverage_click(&["Clear"], render);
-        assert!(!self.tools.log.entries.iter().any(|e| e.owner == owner));
+        let left: Vec<_> = self
+            .tools
+            .log
+            .entries
+            .iter()
+            .filter(|e| e.owner == owner)
+            .map(|e| format!("{} / {}: {}", e.level, e.category, e.text))
+            .collect();
+        assert!(left.is_empty(), "Console Clear left entries: {left:?}");
         println!(
             "TOOL UI CONTRACTS PASSED: console filters/export/evaluation, HAR export, debugger search/watches/breakpoints and diagnostics"
         );

@@ -50,14 +50,14 @@ impl Browser {
         (source.spidermonkey_id, line as u32)
     }
     fn tool_stage(&mut self, stage: usize) {
-        let test = self.toolbox_test.as_mut().unwrap();
+        let test = self.harness.toolbox_test.as_mut().unwrap();
         println!("TOOLBOX stage {stage}");
         test.stage = stage;
         test.at = Instant::now();
         test.capture = None;
     }
     pub fn check_toolbox_test(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Some(test) = &self.toolbox_test else {
+        let Some(test) = &self.harness.toolbox_test else {
             return;
         };
         assert!(
@@ -67,7 +67,7 @@ impl Browser {
         );
         let stage = test.stage;
         let elapsed = test.at.elapsed();
-        let view = self.tab().view.clone();
+        let view = self.view().clone();
         let owner = network::owner(view.id());
         if stage == 0 {
             if view.page_title().as_deref() != Some("Developer toolbox fixture")
@@ -121,9 +121,11 @@ impl Browser {
             self.tools.detail_tab = 2;
             self.tools.active = Tool::Network;
             self.chrome.show_console = true;
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-network.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-network.png".into());
             self.tool_stage(1);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-network.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-network.png".into());
             self.window.request_redraw();
             return;
         }
@@ -137,7 +139,7 @@ impl Browser {
                 pretty(&self.tools.network.har(&owner)),
             )
             .unwrap();
-            self.toolbox_test.as_mut().unwrap().height = self.tools.panel_rect.height();
+            self.harness.toolbox_test.as_mut().unwrap().height = self.tools.panel_rect.height();
             self.tools.active = PROBES[0];
             self.tools.refresh(&view, &self.servo);
             self.tool_stage(2);
@@ -184,7 +186,7 @@ impl Browser {
                     let cookies = &self.tools.pages[&owner].cookies;
                     assert!(cookies.loaded, "Engine cookies must load asynchronously");
                     assert!(cookies.error.is_none(), "{:?}", cookies.error);
-                    assert!(cookies.rows.iter().any(|row| row.name == "lotse_http_only"
+                    assert!(cookies.rows.iter().any(|row| row.name == "wega_http_only"
                         && row.value == "native-only-fixture"
                         && row.http_only
                         && row.path == "/"
@@ -193,19 +195,16 @@ impl Browser {
                         cookies
                             .rows
                             .iter()
-                            .any(|row| row.name == "lotse_visible" && !row.http_only)
+                            .any(|row| row.name == "wega_visible" && !row.http_only)
                     );
                     assert!(
-                        !cookies
-                            .rows
-                            .iter()
-                            .any(|row| row.name == "lotse_wrong_path"),
+                        !cookies.rows.iter().any(|row| row.name == "wega_wrong_path"),
                         "Only URL-matching cookies should be shown"
                     );
                     let visible = data["cookies"].as_str().unwrap_or_default();
-                    assert!(visible.contains("lotse_visible="));
+                    assert!(visible.contains("wega_visible="));
                     assert!(
-                        !visible.contains("lotse_http_only="),
+                        !visible.contains("wega_http_only="),
                         "Native HttpOnly values must never enter the page probe"
                     );
                 }
@@ -260,9 +259,11 @@ impl Browser {
         }
         if stage == 11 && !self.tools.pending() {
             assert!(self.tools.pages[&owner].html.contains("A real Servo page"));
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-inspector.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-inspector.png".into());
             self.tool_stage(12);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-inspector.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-inspector.png".into());
             self.window.request_redraw();
             return;
         }
@@ -329,13 +330,16 @@ impl Browser {
                 "Paused source is selected for line highlighting"
             );
             self.tool_stage(17);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-debugger.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-debugger.png".into());
             self.window.request_redraw();
             return;
         }
         if stage == 17 && elapsed > Duration::from_millis(500) {
             assert!(
-                (self.tools.panel_rect.height() - self.toolbox_test.as_ref().unwrap().height).abs()
+                (self.tools.panel_rect.height()
+                    - self.harness.toolbox_test.as_ref().unwrap().height)
+                    .abs()
                     < 3.0,
                 "Toolbox retains height when switching panels"
             );
@@ -472,7 +476,7 @@ impl Browser {
             self.tools.detail_tab = 2;
             self.tools.active = Tool::Network;
             self.tool_stage(25);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("toolbox-network-imported.png".into());
             self.window.request_redraw();
             return;
@@ -507,7 +511,8 @@ impl Browser {
             assert!(!selected["rules"].as_array().unwrap().is_empty());
             assert!(selected["computed"].as_array().unwrap().len() >= 10);
             self.tool_stage(27);
-            self.toolbox_test.as_mut().unwrap().capture = Some("inspector-layout.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("inspector-layout.png".into());
             self.window.request_redraw();
             return;
         }
@@ -571,7 +576,7 @@ impl Browser {
                 snapshot.error
             );
             assert_eq!(self.tools.pages[&owner].selector, "#heading");
-            self.tools.run(&view,Tool::Inspector,format!("const selector='#heading';if(globalThis.__servoPickerCancel||document.querySelector(selector).style.outline)throw Error('Picker cleanup failed');{}",crate::probes::INSPECTOR));
+            self.tools.run(&view,Tool::Inspector,format!("const selector='#heading';if(globalThis.__wegaPickerCancel||document.querySelector(selector).style.outline)throw Error('Picker cleanup failed');{}",crate::probes::INSPECTOR));
             self.tool_stage(33);
             return;
         }
@@ -581,12 +586,13 @@ impl Browser {
                     .error
                     .is_none()
             );
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Right,
             ));
             self.tools.page(&view).inspector.tab = 0;
             self.tool_stage(34);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-dock-right.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-dock-right.png".into());
             self.window.request_redraw();
             return;
         }
@@ -596,11 +602,12 @@ impl Browser {
                 "Right dock leaves page on left"
             );
             assert!(self.chrome.page_rect.width() >= 180.0);
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Left,
             ));
             self.tool_stage(35);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-dock-left.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-dock-left.png".into());
             self.window.request_redraw();
             return;
         }
@@ -609,12 +616,13 @@ impl Browser {
                 self.tools.panel_rect.max.x < self.chrome.page_rect.min.x,
                 "Left dock leaves page on right"
             );
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Bottom,
             ));
             self.tools.split_console = true;
             self.tool_stage(36);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-split-console.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-split-console.png".into());
             self.window.request_redraw();
             return;
         }
@@ -628,7 +636,7 @@ impl Browser {
                 "Bottom dock leaves page above"
             );
             self.tools.split_console = false;
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Window,
             ));
             self.tool_stage(37);
@@ -640,7 +648,8 @@ impl Browser {
             && self.tool_window.as_ref().is_some_and(|w| w.frames > 1)
         {
             self.tool_stage(38);
-            self.toolbox_test.as_mut().unwrap().capture = Some("detached-inspector.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("detached-inspector.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
         }
@@ -652,7 +661,8 @@ impl Browser {
             );
             self.tools.active = Tool::Network;
             self.tool_stage(39);
-            self.toolbox_test.as_mut().unwrap().capture = Some("detached-network.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("detached-network.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
         }
@@ -674,12 +684,13 @@ impl Browser {
             && elapsed > Duration::from_millis(700)
             && self.tool_window.as_ref().is_some_and(|w| w.frames > 0)
         {
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Left,
             ));
             self.tools.active = Tool::Inspector;
             self.tool_stage(41);
-            self.toolbox_test.as_mut().unwrap().capture = Some("toolbox-redocked.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("toolbox-redocked.png".into());
             self.window.request_redraw();
             return;
         }
@@ -699,7 +710,7 @@ impl Browser {
                 "Engine viewport {width} matches docked page {}",
                 self.chrome.page_rect.width()
             );
-            self.apply(servo_browser::application::Command::Dock(
+            self.apply(wega::application::Command::Dock(
                 crate::tool_window::Dock::Window,
             ));
             self.tool_stage(43);
@@ -725,7 +736,7 @@ impl Browser {
                     .as_deref()
                     .is_some_and(|e| e.contains("cancelled"))
             );
-            self.tools.run(&view,Tool::Inspector,format!("const selector='#heading';if(globalThis.__servoPickerCancel)throw Error('Picker listener not removed');{}",crate::probes::INSPECTOR));
+            self.tools.run(&view,Tool::Inspector,format!("const selector='#heading';if(globalThis.__wegaPickerCancel)throw Error('Picker listener not removed');{}",crate::probes::INSPECTOR));
             self.tool_stage(46);
             return;
         }
@@ -811,7 +822,7 @@ impl Browser {
                 .expanded
                 .insert(info_id);
             self.tool_stage(48);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("detached-advanced-console.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
@@ -946,7 +957,7 @@ impl Browser {
             assert!(!truncated && hits.len() >= 3);
             self.tools.debug.get_mut(&owner).unwrap().advanced.hits = hits;
             self.tool_stage(53);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("detached-advanced-debugger.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
@@ -1114,7 +1125,8 @@ impl Browser {
             );
             self.tools.page(&view).performance.selected = Some(0);
             self.tool_stage(66);
-            self.toolbox_test.as_mut().unwrap().capture = Some("detached-performance.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("detached-performance.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
         }
@@ -1146,7 +1158,8 @@ impl Browser {
                 "Stylesheet list and editor are side by side: {list:?} {editor:?}"
             );
             self.tool_stage(68);
-            self.toolbox_test.as_mut().unwrap().capture = Some("detached-style-editor.png".into());
+            self.harness.toolbox_test.as_mut().unwrap().capture =
+                Some("detached-style-editor.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
         }
@@ -1161,7 +1174,7 @@ impl Browser {
                 .find(|r| r.owner == owner && r.status == Some(200))
                 .map(|r| r.uid);
             self.tool_stage(69);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("detached-network-details.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
@@ -1186,7 +1199,7 @@ impl Browser {
         if stage == 73 && !self.tools.pending() {
             assert!(self.tools.pages[&owner].cookies.loaded);
             self.tool_stage(74);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("detached-storage-cookies.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
@@ -1224,7 +1237,7 @@ impl Browser {
                 "Opaque origins cannot inherit cookies"
             );
             self.tool_stage(72);
-            self.toolbox_test.as_mut().unwrap().capture =
+            self.harness.toolbox_test.as_mut().unwrap().capture =
                 Some("detached-storage-opaque.png".into());
             self.tool_window.as_ref().unwrap().window.request_redraw();
             return;
@@ -1240,7 +1253,7 @@ impl Browser {
             println!(
                 "TOOLBOX TEST PASSED: real HTTP requests, POST payload/response, headers, 404, redirect, waterfall layout, HAR binary round trip/import/filter/sort, composed POST, cURL, DOM tree, matched CSS, computed styles, box model, native element picking/cleanup, attribute editing and undo, left/right/bottom docking, split console, separate OS window close/reopen/redock, CSS source/edit/reset, script sources, debugger pause/resume and executable breakpoints, console evaluation, structured severities/source locations/object previews/stack traces/CSS/page errors, paused lexical scopes, watches, paused-frame evaluation, step shortcuts, breakpoint toggles, source search/ignore, await expressions and accessor-safe previews, performance recording/timeline/frame intervals, right-hand Network/Style Editor panes, opaque-origin storage handling, memory reports, storage edits, actual accessibility nodes, application manifest"
             );
-            self.toolbox_test = None;
+            self.harness.toolbox_test = None;
             event_loop.exit();
         }
     }

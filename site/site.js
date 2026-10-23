@@ -1,7 +1,7 @@
 const copyButton = document.querySelector('#copy-docker');
 const copyStatus = document.querySelector('#copy-status');
 copyButton.addEventListener('click', async () => {
-  const command = "docker run -d --name lotse-browser -p 7443:7443 -e BROWSER_USER=servo -e BROWSER_PASSWORD='choose-a-strong-password' -v lotse-profile:/config ghcr.io/wulfnb/lotse:latest";
+  const command = "docker run -d --name wega-browser -p 127.0.0.1:7443:7443 -e BROWSER_USER=servo -e BROWSER_PASSWORD='choose-a-strong-password' -v wega-profile:/config ghcr.io/wulfnb/wega:latest";
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
     await navigator.clipboard.writeText(command);

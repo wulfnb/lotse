@@ -16,7 +16,7 @@ fn every_native_mode_requires_a_separate_profile() {
                 .unwrap_err()
                 .contains("isolated --profile-dir")
         );
-        let result = parse(&[flag, "--profile-dir", "/tmp/lotse-option-test"]);
+        let result = parse(&[flag, "--profile-dir", "/tmp/wega-option-test"]);
         assert_eq!(result.is_ok(), cfg!(feature = "test-harness"));
     }
 }
@@ -64,7 +64,7 @@ fn native_modes_are_mutually_exclusive() {
             "--smoke-test",
             "--theme-test",
             "--profile-dir",
-            "/tmp/lotse-option-test"
+            "/tmp/wega-option-test"
         ])
         .unwrap_err()
         .contains("only one")
@@ -87,7 +87,7 @@ fn build_capability_validation_is_independent_of_the_engine() {
         "--multiprocess",
         "--download-test",
         "--profile-dir",
-        "/tmp/lotse-parser",
+        "/tmp/wega-parser",
     ];
     let disabled = BuildFeatures {
         multiprocess: false,
@@ -95,7 +95,7 @@ fn build_capability_validation_is_independent_of_the_engine() {
     };
     assert!(
         Options::parse_with(
-            ["--download-test", "--profile-dir", "/tmp/lotse-parser"].map(String::from),
+            ["--download-test", "--profile-dir", "/tmp/wega-parser"].map(String::from),
             disabled
         )
         .unwrap_err()
@@ -109,7 +109,7 @@ fn build_capability_validation_is_independent_of_the_engine() {
                 "--smoke-test",
                 "--theme-test",
                 "--profile-dir",
-                "/tmp/lotse-parser"
+                "/tmp/wega-parser"
             ]
             .map(String::from),
             features

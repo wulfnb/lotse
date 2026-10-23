@@ -10,7 +10,7 @@ if [ "$(uname -s)" = Darwin ]; then
         -C link-arg=-Wl,-sectalign,__DATA,__llvm_prf_data,0x4000 \
         -C link-arg=-Wl,-sectalign,__DATA,__llvm_prf_bits,0x4000
 fi
-if [ "${LOTSE_COVERAGE_BRANCH:-0}" = 1 ]; then
+if [ "${WEGA_COVERAGE_BRANCH:-0}" = 1 ]; then
     exec "$@" -C instrument-coverage -Z coverage-options=branch
 fi
 exec "$@" -C instrument-coverage

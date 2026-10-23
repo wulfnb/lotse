@@ -122,7 +122,9 @@ pub struct Bridge {
     worker: Option<JoinHandle<()>>,
 }
 impl Bridge {
-    pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::engine::Wake>) -> Self {
+    pub fn new(
+        proxy: winit::event_loop::EventLoopProxy<crate::engine::Wake>,
+    ) -> Result<Self, String> {
         let (sender, raw) = crossbeam_channel::unbounded();
         let (ui, events) = crossbeam_channel::bounded(512);
         let stop = Arc::new(AtomicBool::new(false));
@@ -258,14 +260,14 @@ impl Bridge {
                     }
                 }
             })
-            .expect("Create native DevTools observer");
-        Self {
+            .map_err(|e| format!("Cannot start the developer tools observer: {e}"))?;
+        Ok(Self {
             sender,
             events,
             dropped,
             stop,
             worker: Some(worker),
-        }
+        })
     }
 }
 impl Drop for Bridge {

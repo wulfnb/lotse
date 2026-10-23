@@ -30,7 +30,7 @@ pub fn show(notification: servo::Notification, origin: &str) -> Result<(), Strin
         let bundle: Retained<AnyObject> = msg_send![class!(NSBundle), mainBundle];
         let identity: Option<Retained<NSString>> = msg_send![&*bundle, bundleIdentifier];
         if identity.is_none() {
-            return Err("macOS notifications require launching Lotse.app".into());
+            return Err("macOS notifications require launching Wega.app".into());
         }
         let center: Retained<AnyObject> =
             msg_send![class!(UNUserNotificationCenter), currentNotificationCenter];
@@ -42,7 +42,7 @@ pub fn show(notification: servo::Notification, origin: &str) -> Result<(), Strin
         let subtitle = NSString::from_str(origin);
         let _: () = msg_send![&*content,setSubtitle:&*subtitle];
         let id = NSString::from_str(&if notification.tag.is_empty() {
-            format!("servo-{:?}", std::time::SystemTime::now())
+            format!("wega-{:?}", std::time::SystemTime::now())
         } else {
             format!(
                 "{}:{}",

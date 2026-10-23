@@ -50,7 +50,7 @@ pub enum Event {
     Settings,
     Closed(WebViewId),
     Crashed(WebViewId, String),
-    Popup(servo::CreateNewWebViewRequest),
+    Popup(servo::CreateNewWebViewRequest, Option<url::Url>),
     Permission(String, servo::PermissionRequest),
     Authentication(servo::AuthenticationRequest),
     Control(WebViewId, servo::EmbedderControl),
@@ -61,11 +61,19 @@ pub enum Event {
     Fullscreen(bool),
 }
 
+fn origin(view: &WebView) -> String {
+    view.url()
+        .map(|u| u.origin().ascii_serialization())
+        .unwrap_or_default()
+}
+
 pub struct Delegate {
     pub window: Rc<Window>,
     pub active_view: Cell<Option<WebViewId>>,
     pub policy: RefCell<crate::capabilities::Policy>,
     pub handlers: RefCell<std::collections::HashMap<String, url::Url>>,
+    /// Opener document of script-created views, used as the initiator of their first load.
+    pub openers: RefCell<std::collections::HashMap<WebViewId, url::Url>>,
     pub events: RefCell<VecDeque<Event>>,
 }
 
@@ -113,6 +121,7 @@ impl servo::WebViewDelegate for Delegate {
     }
     fn request_unload(&self, view: WebView, request: servo::AllowOrDenyRequest) {
         self.push(Event::Prompt(crate::capabilities::Prompt {
+            origin: origin(&view),
             title: "Leave site?".into(),
             detail: format!(
                 "{} may have changes that have not been saved.",
@@ -124,16 +133,14 @@ impl servo::WebViewDelegate for Delegate {
         }));
     }
     fn request_navigation(&self, view: WebView, request: servo::NavigationRequest) {
-        if request.url.scheme() == "lotse"
+        if request.url.scheme() == "wega"
             && request.url.host_str() == Some("settings")
-            && view.url().is_some_and(|u| u.scheme() == "lotse")
+            && view.url().is_some_and(|u| u.scheme() == "wega")
         {
             self.push(Event::Settings);
         }
 
-        if matches!(request.url.scheme(), "lotse" | "servo")
-            && request.url.host_str() == Some("download")
-        {
+        if request.url.scheme() == "wega" && request.url.host_str() == Some("download") {
             let fields: std::collections::HashMap<_, _> =
                 request.url.query_pairs().into_owned().collect();
             if let Some(url) = fields.get("url") {
@@ -157,11 +164,25 @@ impl servo::WebViewDelegate for Delegate {
                 )));
                 request.deny();
             }
-            "http" | "https" | "about" | "data" | "file" | "blob" | "servo" | "lotse" => {
-                request.allow()
+            "data" | "file"
+                if !wega::navigation::content_navigation_allowed(
+                    &request.url,
+                    view.url()
+                        .filter(|url| url.as_str() != "about:blank")
+                        .or_else(|| self.openers.borrow().get(&view.id()).cloned())
+                        .as_ref(),
+                ) =>
+            {
+                self.push(Event::Status(format!(
+                    "Blocked a page from opening {}: URLs. Enter the address yourself to open it.",
+                    request.url.scheme()
+                )));
+                request.deny();
             }
+            "http" | "https" | "about" | "data" | "file" | "blob" | "wega" => request.allow(),
             "mailto" | "tel" | "sms" | "zoommtg" => {
                 self.push(Event::Prompt(crate::capabilities::Prompt {
+                    origin: origin(&view),
                     title: "Open another application?".into(),
                     detail: request.url.to_string(),
                     decision: crate::capabilities::Decision::External(request.url.clone()),
@@ -184,6 +205,7 @@ impl servo::WebViewDelegate for Delegate {
         request: servo::AllowOrDenyRequest,
     ) {
         self.push(Event::Prompt(crate::capabilities::Prompt {
+            origin: origin(&view),
             title: "Register link handler?".into(),
             detail: format!(
                 "{} requests {:?} for {} using {}",
@@ -316,8 +338,8 @@ impl servo::WebViewDelegate for Delegate {
     fn notify_crashed(&self, view: WebView, reason: String, _: Option<String>) {
         self.push(Event::Crashed(view.id(), reason));
     }
-    fn request_create_new(&self, _: WebView, request: servo::CreateNewWebViewRequest) {
-        self.push(Event::Popup(request));
+    fn request_create_new(&self, parent: WebView, request: servo::CreateNewWebViewRequest) {
+        self.push(Event::Popup(request, parent.url()));
     }
     fn request_permission(&self, view: WebView, request: servo::PermissionRequest) {
         self.push(Event::Permission(
@@ -383,6 +405,7 @@ impl servo::ServoDelegate for Delegate {
     }
     fn request_devtools_connection(&self, request: servo::AllowOrDenyRequest) {
         self.push(Event::Prompt(crate::capabilities::Prompt {
+            origin: "devtools".into(),
             title: "Allow remote developer tools?".into(),
             detail: "The connecting debugger can read and change open pages.".into(),
             decision: crate::capabilities::Decision::Servo(request),

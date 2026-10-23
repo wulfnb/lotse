@@ -50,7 +50,7 @@ impl Browser {
             if send {
                 match self.tools.network_ui.composer.as_ref().unwrap().script() {
                     Ok(script) => {
-                        self.tab().view.evaluate_javascript(script, |_| {});
+                        self.view().evaluate_javascript(script, |_| {});
                         self.tools.notice=Some("Request sent through page fetch; inspect Network and Console for the result.".into());
                     }
                     Err(e) => self.tools.notice = Some(e),

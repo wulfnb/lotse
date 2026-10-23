@@ -10,7 +10,7 @@ pub(crate) struct Chrome {
     pub focus_address: bool,
     pub page_focused: bool,
     pub page_rect: Rect,
-    pub tab_rects: Vec<(servo::WebViewId, Rect)>,
+    pub tab_rects: Vec<(u64, Rect)>,
     pub reload_rect: Rect,
     pub modifiers: Modifiers,
     pub pointer: PhysicalPosition<f64>,

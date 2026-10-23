@@ -20,7 +20,7 @@ fn main() -> ExitCode {
             ]);
         }
     }
-    if env::var("LOTSE_COVERAGE_BRANCH").as_deref() == Ok("1") {
+    if env::var("WEGA_COVERAGE_BRANCH").as_deref() == Ok("1") {
         command.args(["-Z", "coverage-options=branch"]);
     }
     match command.status() {

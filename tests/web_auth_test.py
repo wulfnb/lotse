@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Isolated credential/session tests; never changes the real browser account."""
 import http.client
-from http.server import ThreadingHTTPServer
 import importlib.util
 import json
 import os
@@ -12,18 +11,22 @@ import tempfile
 import threading
 import time
 
-auth_path = Path(os.environ.get('LOTSE_AUTH_MODULE', '/opt/servo/auth-service.py'))
+auth_path = Path(os.environ.get('WEGA_AUTH_MODULE', '/opt/wega/auth-service.py'))
 if not auth_path.exists():
     auth_path = Path(__file__).resolve().parents[1] / 'docker' / 'auth-service.py'
 spec = importlib.util.spec_from_file_location('auth', auth_path)
 auth = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(auth)
 
-with tempfile.TemporaryDirectory(prefix='servo-auth-test-') as temporary:
+with tempfile.TemporaryDirectory(prefix='wega-auth-test-') as temporary:
     auth.DIRECTORY = Path(temporary)
     username = 'test-' + secrets.token_hex(8)
     password = secrets.token_urlsafe(32)
-    os.environ.update(BROWSER_USER=username, BROWSER_PASSWORD=password, BROWSER_WEBSOCKET_PORT='6084')
+    os.environ.update(BROWSER_USER=username, BROWSER_PASSWORD=password)
+    # Private Unix sockets for this isolated gateway/bridge; the bridge targets
+    # the container's real x11vnc socket.
+    auth.WEBSOCKET_SOCKET = str(auth.DIRECTORY / 'websocket.sock')
+    gateway = str(auth.DIRECTORY / 'auth.sock')
     os.environ.pop('BROWSER_PASSWORD_FILE', None)
     auth.initialize()
     assert username.encode() not in (auth.DIRECTORY / 'account.enc').read_bytes()
@@ -33,9 +36,15 @@ with tempfile.TemporaryDirectory(prefix='servo-auth-test-') as temporary:
     assert auth.DIRECTORY.stat().st_mode & 0o777 == 0o700
     assert 'password' not in auth.account() and auth.account()['password_hash'] != password
     auth.restart_websocket()
-    server = ThreadingHTTPServer(('127.0.0.1', 0), auth.Handler)
+    server = auth.UnixHTTPServer(gateway, auth.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     origin = 'https://auth-check.local:7443'
+
+    class UnixConnection(http.client.HTTPConnection):
+        def connect(self):
+            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock.settimeout(self.timeout)
+            self.sock.connect(gateway)
 
     def request(path, data=None, cookie=None, csrf=None, request_origin=origin):
         headers = {'Origin': request_origin, 'X-Forwarded-Host': 'auth-check.local:7443', 'X-Real-IP': 'test'}
@@ -45,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='servo-auth-test-') as temporary:
             headers['X-CSRF-Token'] = csrf
         if data is not None:
             headers['Content-Type'] = 'application/json'
-        connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=10)
+        connection = UnixConnection('localhost', timeout=10)
         connection.request('POST' if data is not None else 'GET', path, json.dumps(data) if data is not None else None, headers)
         response = connection.getresponse()
         body = response.read()
@@ -81,12 +90,16 @@ with tempfile.TemporaryDirectory(prefix='servo-auth-test-') as temporary:
         control = None
         for _ in range(50):
             try:
-                control = socket.create_connection(('127.0.0.1', 6084), timeout=1)
+                attempt = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                attempt.settimeout(1)
+                attempt.connect(auth.WEBSOCKET_SOCKET)
+                control = attempt
                 break
             except OSError:
+                attempt.close()
                 time.sleep(.1)
         assert control is not None
-        control.sendall(b'GET / HTTP/1.1\r\nHost: localhost:6084\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: binary\r\n\r\n')
+        control.sendall(b'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: binary\r\n\r\n')
         assert b'101' in control.recv(4096)
         control.settimeout(.2)
         try:
@@ -123,4 +136,5 @@ with tempfile.TemporaryDirectory(prefix='servo-auth-test-') as temporary:
         print('PASS: encrypted storage/bootstrap, password hashing, login/session flags, current-password verification, CSRF/origin checks, validation, credential rotation, old-session rejection, active WebSocket revocation, persistence, logout and rate limiting')
     finally:
         server.shutdown()
+        server.server_close()
         auth.stop_websocket()

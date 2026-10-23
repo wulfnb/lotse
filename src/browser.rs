@@ -5,11 +5,6 @@ use crate::{
     profile::{self, Bookmark, Profile, TabLayout},
 };
 use servo::{InputEvent, RenderingContext, WebView, WebViewBuilder, WindowRenderingContext};
-use servo_browser::{
-    application::{Application, Command as AppCommand, Event as AppEvent},
-    session::{Command, Session},
-    storage::FileProfileStore,
-};
 use std::cell::RefCell;
 use std::{
     collections::VecDeque,
@@ -17,6 +12,11 @@ use std::{
     rc::Rc,
     sync::Arc,
     time::{Duration, Instant},
+};
+use wega::{
+    application::{Application, Command as AppCommand, Event as AppEvent},
+    session::{Command, Session},
+    storage::FileProfileStore,
 };
 use winit::{
     dpi::{PhysicalPosition, PhysicalSize},
@@ -27,31 +27,65 @@ use winit::{
     window::{Fullscreen, Window},
 };
 
-pub struct Tab {
+/// Engine resources of a loaded tab.
+pub struct Live {
     pub(crate) view: WebView,
     pub(crate) surface: Rc<servo::OffscreenRenderingContext>,
+}
+
+/// A tab is either loaded (`live`) or unloaded: restored but not yet selected, or
+/// discarded after being idle. Unloaded tabs keep only their address, title and
+/// lifecycle data, and get a fresh engine view when they are selected.
+pub struct Tab {
+    pub(crate) live: Option<Live>,
+    /// Stable for the life of the tab, across unloading and reloading.
+    pub(crate) key: u64,
     pub(crate) initial_url: String,
+    pub(crate) saved_title: String,
     pub(crate) crash: Option<String>,
-    pub(crate) history: servo_browser::navigation::History,
+    pub(crate) history: wega::navigation::History,
+    pub(crate) last_selected: Instant,
+    /// Script-opened views keep an opener relationship; never discard them.
+    pub(crate) opened_by_page: bool,
 }
 
 impl Tab {
+    pub(crate) fn view(&self) -> Option<&WebView> {
+        self.live.as_ref().map(|live| &live.view)
+    }
+    pub(crate) fn id(&self) -> Option<servo::WebViewId> {
+        self.view().map(WebView::id)
+    }
+    pub(crate) fn loaded(&self) -> bool {
+        self.live.is_some()
+    }
+    /// WebDriver handle and drag-and-drop identity; survives unloading.
+    pub(crate) fn handle(&self) -> String {
+        format!("tab-{}", self.key)
+    }
     pub(crate) fn url(&self) -> String {
-        self.view
-            .url()
+        self.view()
+            .and_then(WebView::url)
             .map(|u| u.to_string())
             .unwrap_or_else(|| self.initial_url.clone())
     }
     pub(crate) fn title(&self) -> String {
-        self.view
-            .page_title()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                self.view
-                    .url()
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .unwrap_or_else(|| "New tab".into())
-            })
+        let fallback = |url: Option<url::Url>| {
+            url.and_then(|u| u.host_str().map(str::to_owned))
+                .unwrap_or_else(|| "New tab".into())
+        };
+        match self.view() {
+            Some(view) => view
+                .page_title()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| fallback(view.url())),
+            None if !self.saved_title.is_empty() => self.saved_title.clone(),
+            None => fallback(url::Url::parse(&self.initial_url).ok()),
+        }
+    }
+    pub(crate) fn loading(&self) -> bool {
+        self.view()
+            .is_some_and(|view| view.load_status() != servo::LoadStatus::Complete)
     }
 }
 
@@ -60,7 +94,7 @@ pub struct Browser {
     pub(crate) automation: Option<crossbeam_channel::Receiver<crate::automation::Job>>,
     pub(crate) automation_navigation: Option<crate::automation::PendingNavigation>,
     #[cfg(feature = "test-harness")]
-    pub(crate) capabilities_test: Option<crate::capabilities_test::Test>,
+    pub(crate) harness: crate::harness::Harness,
     pub(crate) favicons: std::collections::HashMap<String, egui::TextureHandle>,
     pub(crate) features: crate::capabilities::State,
     pub(crate) documents: crate::capabilities::Documents,
@@ -79,37 +113,23 @@ pub struct Browser {
     last_window_title: String,
     pub(crate) tool_window: Option<crate::tool_window::ToolWindow>,
     pub(crate) tools: crate::toolbox::Toolbox,
-    #[cfg(feature = "test-harness")]
-    pub(crate) toolbox_test: Option<crate::toolbox_test::Test>,
-    #[cfg(feature = "test-harness")]
-    pub(crate) theme_test: Option<crate::theme_test::Test>,
     pub(crate) console: VecDeque<(servo::WebViewId, String)>,
-    permissions: servo_browser::permissions::Permissions<crate::permission_adapter::Permission>,
-    pub(crate) authentications: VecDeque<servo::AuthenticationRequest>,
-    pub(crate) controls: VecDeque<(servo::WebViewId, servo::EmbedderControl)>,
+    pub(crate) dialogs: crate::capabilities::Dialogs,
     pub(crate) status: Option<String>,
     pub(crate) accessibility: crate::accessibility::State,
     pub(crate) resources: crate::resources::Monitor,
     pub(crate) downloads: crate::downloads::Manager,
     pub(crate) download_ui: crate::downloads_ui::State,
-    #[cfg(feature = "test-harness")]
-    pub(crate) download_test: Option<crate::download_test::Test>,
     pub(crate) fullscreen: bool,
     pub(crate) quit_requested: bool,
     pub(crate) repaint_deadline: Arc<std::sync::Mutex<Option<Instant>>>,
     pub(crate) pending_save: Option<Instant>,
-    #[cfg(feature = "test-harness")]
-    pub(crate) smoke: Option<Smoke>,
     pub(crate) capture: Option<crate::capture::Capture>,
-}
-
-#[cfg(feature = "test-harness")]
-pub struct Smoke {
-    pub(crate) start: Instant,
-    pub(crate) stage: u8,
-    pub(crate) stage_at: Instant,
-    pub(crate) result:
-        Rc<RefCell<Option<Result<servo::JSValue, servo::JavaScriptEvaluationError>>>>,
+    next_tab_key: u64,
+    discard_checked: Instant,
+    /// The window is minimized or fully covered; skip work that only updates pixels.
+    pub(crate) occluded: bool,
+    pub(crate) focused: bool,
 }
 
 impl Browser {
@@ -128,6 +148,7 @@ impl Browser {
         if options.download_test {
             downloads.directory = profile_dir.join("test-downloads");
         }
+        downloads.marker = Some(Arc::new(crate::download_actions::mark_downloaded));
         std::fs::create_dir_all(&profile_dir).map_err(|e| format!("Cannot create profile: {e}"))?;
         let (application, warning) =
             Application::load(Box::new(FileProfileStore::open(&profile_dir)?));
@@ -166,7 +187,9 @@ impl Browser {
         let deadline = repaint_deadline.clone();
         gui.egui_ctx.set_request_repaint_callback(move |info| {
             if let Some(when) = Instant::now().checked_add(info.delay) {
-                let mut deadline = deadline.lock().unwrap();
+                let mut deadline = deadline
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if deadline.is_none_or(|current| when < current) {
                     *deadline = Some(when);
                 }
@@ -182,18 +205,16 @@ impl Browser {
             multiprocess: options.multiprocess,
             ..Default::default()
         };
-        let tools = crate::toolbox::Toolbox::new(proxy.clone());
+        let tools = crate::toolbox::Toolbox::new(proxy.clone())?;
         let native_media = crate::native_media::NativeMedia::new(proxy.clone());
         let documents = Default::default();
         let mut protocols = servo::protocol_handler::ProtocolRegistry::default();
-        for scheme in ["lotse", "servo"] {
-            protocols
-                .register(
-                    scheme,
-                    crate::capabilities::InternalPages(std::sync::Arc::clone(&documents)),
-                )
-                .map_err(|e| format!("Internal protocol: {e:?}"))?;
-        }
+        protocols
+            .register(
+                "wega",
+                crate::capabilities::InternalPages(std::sync::Arc::clone(&documents)),
+            )
+            .map_err(|e| format!("Internal protocol: {e:?}"))?;
         let automation = options
             .webdriver_port
             .map(|port| crate::automation::start(port, proxy.clone()))
@@ -226,6 +247,7 @@ impl Browser {
             events: RefCell::new(VecDeque::new()),
             policy: RefCell::new(profile.policy.clone()),
             handlers: RefCell::new(Default::default()),
+            openers: RefCell::new(Default::default()),
         });
         servo.set_delegate(delegate.clone());
         let mut features = crate::capabilities::State {
@@ -243,23 +265,14 @@ impl Browser {
         let favicons = profile
             .favicons
             .iter()
+            .filter(|(_, image)| image.valid(64))
             .filter_map(|(url, image)| {
-                if image.width == 0
-                    || image.height == 0
-                    || image.width > 64
-                    || image.height > 64
-                    || image.rgba.len() != image.width * image.height * 4
-                {
-                    return None;
-                }
+                let (width, height, rgba) = decode_favicon(image)?;
                 Some((
                     url.clone(),
                     gui.egui_ctx.load_texture(
                         "favicon",
-                        egui::ColorImage::from_rgba_unmultiplied(
-                            [image.width, image.height],
-                            &image.rgba,
-                        ),
+                        egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba),
                         egui::TextureOptions::LINEAR,
                     ),
                 ))
@@ -268,9 +281,7 @@ impl Browser {
         let mut browser = Self {
             chrome: Default::default(),
             #[cfg(feature = "test-harness")]
-            capabilities_test: options
-                .capabilities_test
-                .then(crate::capabilities_test::Test::new),
+            harness: crate::harness::Harness::new(options),
             automation,
             automation_navigation: None,
             features,
@@ -292,18 +303,10 @@ impl Browser {
             resources: crate::resources::Monitor::new(),
             downloads,
             download_ui: Default::default(),
-            #[cfg(feature = "test-harness")]
-            download_test: options.download_test.then(crate::download_test::Test::new),
             tool_window: None,
             tools,
-            #[cfg(feature = "test-harness")]
-            toolbox_test: options.toolbox_test.then(crate::toolbox_test::Test::new),
-            #[cfg(feature = "test-harness")]
-            theme_test: options.theme_test.then(crate::theme_test::Test::new),
             console: VecDeque::new(),
-            permissions: Default::default(),
-            authentications: VecDeque::new(),
-            controls: VecDeque::new(),
+            dialogs: Default::default(),
             accessibility: Default::default(),
             status: if options.remote_devtools.is_some() {
                 Some("Remote DevTools mode: native Network/Debugger recording is disabled. Connect Firefox via about:debugging.".into())
@@ -314,18 +317,16 @@ impl Browser {
             quit_requested: false,
             repaint_deadline,
             pending_save: None,
-            #[cfg(feature = "test-harness")]
-            smoke: options.smoke_test.then(|| Smoke {
-                start: Instant::now(),
-                stage_at: Instant::now(),
-                stage: 0,
-                result: Rc::new(RefCell::new(None)),
-            }),
+            next_tab_key: 0,
+            discard_checked: Instant::now(),
+            occluded: false,
+            focused: true,
             capture: options
                 .capture
                 .as_ref()
                 .map(|path| crate::capture::Capture::new(path.clone())),
         };
+        let restore = options.url.is_none() && !options.test_mode();
         let urls = if (options.smoke_test || options.theme_test || options.capabilities_test)
             && options.url.is_none()
         {
@@ -340,20 +341,28 @@ impl Browser {
         } else if options.toolbox_test && options.url.is_none() {
             vec!["http://127.0.0.1:8767/toolbox.html".into()]
         } else if let Some(url) = &options.url {
-            vec![profile::resolve_address(url)?.to_string()]
+            vec![browser.resolve(url)?.to_string()]
         } else {
             browser.profile().urls.clone()
         };
+        let titles = if restore {
+            browser.profile().titles.clone()
+        } else {
+            Vec::new()
+        };
         let saved_active = browser.profile().active;
-        for address in urls.iter().take(100) {
-            if let Ok(url) = profile::resolve_address(address) {
-                browser.add_tab_url(url, false);
+        // Restored tabs start unloaded; only the selected one gets an engine view below.
+        for (index, address) in urls.iter().take(100).enumerate() {
+            if let Ok(url) = browser.resolve(address) {
+                let title = titles.get(index).cloned().unwrap_or_default();
+                browser.push_tab(None, url.to_string(), title, false);
             }
         }
         if browser.session.tabs().is_empty() {
-            browser.add_tab(profile::HOME);
+            browser.push_tab(None, profile::HOME.into(), String::new(), false);
         }
         browser.select_tab(saved_active.min(browser.session.tabs().len() - 1));
+        browser.migrate_favicons();
         browser.window.set_visible(true);
         browser.window.set_ime_allowed(true);
         browser.window.request_redraw();
@@ -366,22 +375,16 @@ impl Browser {
     pub(crate) fn move_tab(&mut self, from: usize, to: usize) {
         if !matches!(
             self.session.apply(Command::Move { from, to }),
-            servo_browser::session::Event::Unchanged
+            wega::session::Event::Unchanged
         ) {
             self.changed();
         }
     }
-    pub(crate) fn pending_permission(
-        &self,
-    ) -> Option<(servo_browser::permissions::RequestId, &str, &str)> {
-        self.permissions.front()
+    pub(crate) fn pending_permission(&self) -> Option<(wega::permissions::RequestId, &str, &str)> {
+        self.dialogs.permissions.front()
     }
-    pub(crate) fn answer_permission(
-        &mut self,
-        id: servo_browser::permissions::RequestId,
-        allow: bool,
-    ) {
-        self.permissions.answer(id, allow);
+    pub(crate) fn answer_permission(&mut self, id: wega::permissions::RequestId, allow: bool) {
+        self.dialogs.permissions.answer(id, allow);
     }
     pub(crate) fn profile(&self) -> &Profile {
         self.application.profile()
@@ -412,37 +415,227 @@ impl Browser {
     pub(crate) fn tab(&self) -> &Tab {
         &self.session.tabs()[self.session.active()]
     }
+    /// Engine resources of the selected tab, which is always loaded.
+    pub(crate) fn live(&self) -> &Live {
+        self.tab()
+            .live
+            .as_ref()
+            .expect("the selected tab is always loaded")
+    }
+    pub(crate) fn view(&self) -> &WebView {
+        &self.live().view
+    }
+    pub(crate) fn tab_index(&self, id: servo::WebViewId) -> Option<usize> {
+        self.session.tabs().iter().position(|t| t.id() == Some(id))
+    }
+    /// Resolve typed or saved input with the configured search engine.
+    pub(crate) fn resolve(&self, address: &str) -> Result<url::Url, String> {
+        profile::resolve_address_with(address, &self.profile().policy)
+    }
 
     pub(crate) fn add_tab(&mut self, address: &str) {
-        match profile::resolve_address(address) {
-            Ok(url) => self.add_tab_url(url, true),
+        match self.resolve(address) {
+            Ok(url) => self.add_tab_url(url),
             Err(error) => self.status = Some(error),
         }
     }
 
-    fn add_tab_url(&mut self, url: url::Url, activate: bool) {
-        let surface = Rc::new(self.context.offscreen_context(PhysicalSize::new(1000, 700)));
-        let view = WebViewBuilder::new(&self.servo, surface.clone())
-            .user_content_manager(self.content_manager.clone())
-            .url(url.clone())
-            .hidpi_scale_factor(euclid::Scale::new(self.window.scale_factor() as f32))
-            .delegate(self.delegate.clone())
-            .clipboard_delegate(Rc::new(engine::Clipboard))
-            .build();
-        view.notify_theme_change(servo::Theme::Dark);
+    fn add_tab_url(&mut self, url: url::Url) {
+        let live = self.create_view(Some(&url));
+        let index = self.push_tab(Some(live), url.to_string(), String::new(), false);
+        self.select_tab(index);
+        self.changed();
+    }
+
+    fn push_tab(
+        &mut self,
+        live: Option<Live>,
+        url: String,
+        title: String,
+        opened_by_page: bool,
+    ) -> usize {
+        self.next_tab_key += 1;
         self.session.push(Tab {
-            view,
-            surface,
-            initial_url: url.to_string(),
+            live,
+            key: self.next_tab_key,
+            initial_url: url,
+            saved_title: title,
             crash: None,
             history: Default::default(),
+            last_selected: Instant::now(),
+            opened_by_page,
         });
-        if activate {
-            self.select_tab(self.session.tabs().len() - 1);
+        self.session.tabs().len() - 1
+    }
+
+    /// Offscreen surface sized like the page area, so selecting the tab needs no resize.
+    fn tab_surface(&self) -> Rc<servo::OffscreenRenderingContext> {
+        let scale = self.window.scale_factor() as f32;
+        let rect = self.chrome.page_rect;
+        let size = if rect.width() >= 1.0 && rect.height() >= 1.0 {
+            PhysicalSize::new(
+                (rect.width() * scale).round() as u32,
+                (rect.height() * scale).round() as u32,
+            )
         } else {
-            self.session.tabs().last().unwrap().view.hide();
+            PhysicalSize::new(1000, 700)
+        };
+        Rc::new(self.context.offscreen_context(size))
+    }
+
+    fn create_view(&self, url: Option<&url::Url>) -> Live {
+        let surface = self.tab_surface();
+        let mut builder = WebViewBuilder::new(&self.servo, surface.clone())
+            .user_content_manager(self.content_manager.clone())
+            .hidpi_scale_factor(euclid::Scale::new(self.window.scale_factor() as f32))
+            .delegate(self.delegate.clone())
+            .clipboard_delegate(Rc::new(engine::Clipboard));
+        if let Some(url) = url {
+            builder = builder.url(url.clone());
         }
+        let view = builder.build();
+        view.notify_theme_change(servo::Theme::Dark);
+        Live { view, surface }
+    }
+
+    /// Give an unloaded tab a fresh engine view at its saved address.
+    fn load_tab(&mut self, index: usize) {
+        let Some(tab) = self.session.tabs().get(index) else {
+            return;
+        };
+        if tab.loaded() {
+            return;
+        }
+        let url = profile::resolve_address(&tab.initial_url)
+            .unwrap_or_else(|_| url::Url::parse("about:blank").expect("static URL"));
+        let live = self.create_view(Some(&url));
+        live.view.hide();
+        let tab = &mut self.session.tabs_mut()[index];
+        tab.live = Some(live);
+        tab.history = Default::default();
+    }
+
+    /// Release state that belongs to a view that is closing or being unloaded.
+    fn forget_view(&mut self, id: servo::WebViewId) {
+        self.features.media.remove(&id);
+        if self.features.media_owner == Some(id) {
+            self.features.media_owner = None;
+            self.native_media.clear();
+        }
+        self.features.traversals.remove(&id);
+        self.tools.closed(id);
+        self.dialogs.forget(id);
+        self.delegate.openers.borrow_mut().remove(&id);
+        if self.accessibility.grafted == Some(id) {
+            self.accessibility.grafted = None;
+        }
+        self.accessibility.pending.retain(|(owner, _)| *owner != id);
+        self.console.retain(|(owner, _)| *owner != id);
+    }
+
+    /// Whether unloading this tab could lose something the user would notice.
+    fn tab_busy(&self, tab: &Tab) -> bool {
+        let Some(id) = tab.id() else {
+            return false;
+        };
+        let owner = crate::network::owner(id);
+        tab.opened_by_page
+            || tab.loading()
+            || tab.crash.is_some()
+            || self.features.media_owner == Some(id)
+            || self.features.media.get(&id).is_some_and(|m| m.playing)
+            || self.features.traversals.contains_key(&id)
+            || self.dialogs.has_controls_for(id)
+            // Every page has a debugger record; only paused or instrumented ones matter.
+            || self
+                .tools
+                .debug
+                .get(&owner)
+                .is_some_and(|d| d.paused || !d.breakpoints.is_empty())
+            || self
+                .automation_navigation
+                .as_ref()
+                .is_some_and(|p| p.owner == id)
+    }
+
+    /// Unload a background tab, keeping its address, title and favicon.
+    /// Returns false for the selected tab and for tabs that are already unloaded.
+    pub(crate) fn discard_tab(&mut self, index: usize) -> bool {
+        if index == self.session.active()
+            || !self.session.tabs().get(index).is_some_and(Tab::loaded)
+        {
+            return false;
+        }
+        let tab = &self.session.tabs()[index];
+        let (url, title, id) = (tab.url(), tab.title(), tab.id());
+        if let Some(id) = id {
+            self.forget_view(id);
+        }
+        let tab = &mut self.session.tabs_mut()[index];
+        tab.initial_url = url;
+        tab.saved_title = title;
+        tab.crash = None;
+        // Dropping the last handle closes the engine view and frees its surface.
+        tab.live = None;
         self.changed();
+        true
+    }
+
+    fn discard_timeout(&self) -> Option<Duration> {
+        // Native test scenarios assert on live tabs; never unload behind their back.
+        if self.smoke_testing() {
+            return None;
+        }
+        wega::lifecycle::timeout(self.profile().policy.discard_after_minutes)
+    }
+
+    /// Unload background tabs that have been idle longer than the configured timeout.
+    fn discard_idle_tabs(&mut self) {
+        let timeout = self.discard_timeout();
+        if self
+            .next_discard_check(timeout)
+            .is_none_or(|due| due > Instant::now())
+        {
+            return;
+        }
+        self.discard_checked = Instant::now();
+        // Dialogs are not attributed to tabs reliably; wait until they are answered.
+        let blocked = !self.dialogs.is_empty() || self.chrome.show_console;
+        let candidates: Vec<usize> = self
+            .session
+            .tabs()
+            .iter()
+            .enumerate()
+            .filter(|(index, tab)| {
+                wega::lifecycle::may_discard(
+                    wega::lifecycle::Activity {
+                        active: *index == self.session.active(),
+                        loaded: tab.loaded(),
+                        busy: blocked || self.tab_busy(tab),
+                        idle: tab.last_selected.elapsed(),
+                    },
+                    timeout,
+                )
+            })
+            .map(|(index, _)| index)
+            .collect();
+        for index in candidates {
+            self.discard_tab(index);
+        }
+    }
+
+    fn next_discard_check(&self, timeout: Option<Duration>) -> Option<Instant> {
+        let active = self.session.active();
+        wega::lifecycle::next_check(
+            self.session
+                .tabs()
+                .iter()
+                .enumerate()
+                .filter(|(index, tab)| *index != active && tab.loaded())
+                .map(|(_, tab)| tab.last_selected),
+            timeout,
+            self.discard_checked,
+        )
     }
 
     pub(crate) fn select_tab(&mut self, index: usize) {
@@ -450,16 +643,25 @@ impl Browser {
             return;
         }
         self.release_pointer();
+        self.load_tab(index);
+        let now = Instant::now();
+        let previous = self.session.active();
+        if let Some(tab) = self.session.tabs_mut().get_mut(previous) {
+            tab.last_selected = now;
+        }
         for (i, tab) in self.session.tabs().iter().enumerate() {
-            if i == index {
-                tab.view.show();
-            } else {
-                tab.view.hide();
+            if let Some(view) = tab.view() {
+                if i == index {
+                    view.show();
+                } else {
+                    view.hide();
+                }
+                view.set_focused(false);
             }
-            tab.view.set_focused(false);
         }
         self.session.apply(Command::Select(index));
-        self.delegate.active_view.set(Some(self.tab().view.id()));
+        self.session.tabs_mut()[index].last_selected = now;
+        self.delegate.active_view.set(Some(self.view().id()));
         self.chrome.page_focused = false;
         self.chrome.address = self.tab().url();
         self.chrome.last_url = self.chrome.address.clone();
@@ -481,14 +683,9 @@ impl Browser {
         if self.chrome.closed_tabs.len() > 30 {
             self.chrome.closed_tabs.remove(0);
         }
-        self.features
-            .media
-            .remove(&self.session.tabs()[index].view.id());
-        if self.features.media_owner == Some(self.session.tabs()[index].view.id()) {
-            self.features.media_owner = None;
-            self.native_media.clear();
+        if let Some(id) = self.session.tabs()[index].id() {
+            self.forget_view(id);
         }
-        self.tools.closed(self.session.tabs()[index].view.id());
         self.session.apply(Command::Close(index));
         if self.session.tabs().is_empty() {
             self.add_tab("about:blank");
@@ -500,26 +697,57 @@ impl Browser {
         self.changed();
     }
 
+    /// Re-encode favicons from profiles that stored raw pixels; the next save
+    /// writes the compact PNG form.
+    fn migrate_favicons(&mut self) {
+        let legacy: Vec<(String, profile::SavedFavicon)> = self
+            .profile()
+            .favicons
+            .iter()
+            .filter(|(_, icon)| matches!(icon, profile::SavedFavicon::Rgba { .. }))
+            .map(|(url, icon)| (url.clone(), icon.clone()))
+            .collect();
+        for (url, icon) in legacy {
+            if let profile::SavedFavicon::Rgba {
+                width,
+                height,
+                rgba,
+            } = icon
+                && let Some(png) = encode_favicon(width, height, rgba)
+            {
+                self.apply(AppCommand::Favicon {
+                    url,
+                    image: profile::SavedFavicon::Png(png),
+                });
+            }
+        }
+    }
+
     pub(crate) fn media_action(&self, action: Option<servo::MediaSessionActionType>) {
         let Some(owner) = self.features.media_owner else {
             return;
         };
-        if let Some(tab) = self.session.tabs().iter().find(|t| t.view.id() == owner) {
+        if let Some(view) = self
+            .session
+            .tabs()
+            .iter()
+            .filter_map(Tab::view)
+            .find(|view| view.id() == owner)
+        {
             let playing = self.features.media.get(&owner).is_some_and(|m| m.playing);
-            tab.view
-                .notify_media_session_action_event(action.unwrap_or(if playing {
-                    servo::MediaSessionActionType::Pause
-                } else {
-                    servo::MediaSessionActionType::Play
-                }));
+            view.notify_media_session_action_event(action.unwrap_or(if playing {
+                servo::MediaSessionActionType::Pause
+            } else {
+                servo::MediaSessionActionType::Play
+            }));
         }
     }
     pub(crate) fn dispatch_navigation(
         &mut self,
-        command: servo_browser::navigation::Command,
+        command: wega::navigation::Command,
     ) -> Result<bool, String> {
-        let view = self.tab().view.clone();
-        let result = servo_browser::navigation::dispatch(
+        let view = self.view().clone();
+        let result = wega::navigation::dispatch(
             command,
             &mut crate::navigation_adapter::Navigation {
                 view: &view,
@@ -530,28 +758,28 @@ impl Browser {
         result
     }
     pub(crate) fn reload(&mut self) {
-        let _ = self.dispatch_navigation(servo_browser::navigation::Command::Reload);
+        let _ = self.dispatch_navigation(wega::navigation::Command::Reload);
     }
     pub(crate) fn reset_zoom(&mut self) {
-        let _ = self.dispatch_navigation(servo_browser::navigation::Command::ResetZoom);
+        let _ = self.dispatch_navigation(wega::navigation::Command::ResetZoom);
     }
     pub(crate) fn traverse(&mut self, forward: bool) {
-        let _ = self.dispatch_navigation(servo_browser::navigation::Command::Traverse { forward });
+        let _ = self.dispatch_navigation(wega::navigation::Command::Traverse { forward });
     }
     pub(crate) fn navigate(&mut self, address: &str) {
-        if address == "lotse://settings" {
+        if address == "wega://settings" {
             self.features.settings = true;
         }
-        match profile::resolve_address(address) {
+        match self.resolve(address) {
             Ok(url) => {
                 let active = self.session.active();
                 self.session.tabs_mut()[active].crash = None;
                 self.chrome.address = url.to_string();
                 self.chrome.last_url = self.chrome.address.clone();
-                self.dispatch_navigation(servo_browser::navigation::Command::Load(url.to_string()))
+                self.dispatch_navigation(wega::navigation::Command::Load(url.to_string()))
                     .expect("validated address");
                 self.chrome.page_focused = true;
-                self.tab().view.set_focused(true);
+                self.view().set_focused(true);
                 self.status = None;
                 self.changed();
             }
@@ -582,15 +810,11 @@ impl Browser {
         let p = theme.palette(dark, false);
         let css = serde_json::to_string(&crate::capabilities::theme_stylesheet(p)).unwrap();
         let script = format!(
-            "document.getElementById('lotse-theme')?.replaceChildren(document.createTextNode({css}))"
+            "document.getElementById('wega-theme')?.replaceChildren(document.createTextNode({css}))"
         );
-        for tab in self.session.tabs() {
-            if tab
-                .view
-                .url()
-                .is_some_and(|u| matches!(u.scheme(), "lotse" | "servo"))
-            {
-                tab.view.evaluate_javascript(script.clone(), |_| {});
+        for view in self.session.tabs().iter().filter_map(Tab::view) {
+            if view.url().is_some_and(|u| u.scheme() == "wega") {
+                view.evaluate_javascript(script.clone(), |_| {});
             }
         }
         self.changed();
@@ -613,8 +837,13 @@ impl Browser {
     }
 
     pub(crate) fn save(&mut self) {
-        let urls = self.session.tabs().iter().map(Tab::url).collect();
-        if let Err(error) = self.application.save_session(urls, self.session.active()) {
+        let tabs = self
+            .session
+            .tabs()
+            .iter()
+            .map(|tab| (tab.url(), tab.title()))
+            .collect();
+        if let Err(error) = self.application.save_tabs(tabs, self.session.active()) {
             self.status = Some(format!("Could not save browser profile: {error}"));
             eprintln!("{}", self.status.as_deref().unwrap());
         }
@@ -642,19 +871,17 @@ impl Browser {
         }
         if !self.chrome.show_console && self.tools.attention.is_none() {
             self.tools.resume_all();
-            for tab in self.session.tabs() {
-                if !self.accessibility.active {
-                    tab.view.set_accessibility_active(false);
+            if !self.accessibility.active {
+                for view in self.session.tabs().iter().filter_map(Tab::view) {
+                    view.set_accessibility_active(false);
                 }
             }
         }
         if let Some(owner) = self.tools.attention.take() {
-            if let Some(index) = self
-                .session
-                .tabs()
-                .iter()
-                .position(|tab| crate::network::owner(tab.view.id()) == owner)
-            {
+            if let Some(index) = self.session.tabs().iter().position(|tab| {
+                tab.id()
+                    .is_some_and(|id| crate::network::owner(id) == owner)
+            }) {
                 self.select_tab(index);
             }
             self.chrome.show_console = true;
@@ -666,13 +893,8 @@ impl Browser {
                 Event::Download(url, name) => self.offer_download(&url, &name),
                 Event::Load(owner, status) => self.automation_load_status(owner, status),
                 Event::History(owner, urls, active) => {
-                    if let Some(tab) = self
-                        .session
-                        .tabs_mut()
-                        .iter_mut()
-                        .find(|tab| tab.view.id() == owner)
-                    {
-                        tab.history.update(urls, active);
+                    if let Some(index) = self.tab_index(owner) {
+                        self.session.tabs_mut()[index].history.update(urls, active);
                     }
                 }
                 Event::Traversal(owner, id) => {
@@ -744,19 +966,22 @@ impl Browser {
                                 rgba.extend_from_slice(&pixels[at..at + 4]);
                             }
                         }
-                        self.apply(AppCommand::Favicon {
-                            url,
-                            image: profile::SavedFavicon {
-                                width: w,
-                                height: h,
-                                rgba,
-                            },
-                        });
-                        self.changed();
+                        // Unchanged icons do not mark the profile dirty.
+                        if let Some(png) = encode_favicon(w, h, rgba) {
+                            self.apply(AppCommand::Favicon {
+                                url,
+                                image: profile::SavedFavicon::Png(png),
+                            });
+                        }
                     }
                     self.window.request_redraw();
                 }
-                Event::Prompt(prompt) => self.features.prompts.push_back(prompt),
+                Event::Prompt(prompt) => {
+                    if !self.dialogs.push_prompt(prompt) {
+                        self.status =
+                            Some("Too many pending site requests; the latest was declined.".into());
+                    }
+                }
                 Event::Settings => self.features.settings = true,
                 Event::Notice(notice) => {
                     self.status = None;
@@ -764,13 +989,13 @@ impl Browser {
                 }
                 Event::NativeAccessibility(id, update) => {
                     #[cfg(feature = "test-harness")]
-                    if self.toolbox_test.is_some() {
+                    if self.harness.toolbox_test.is_some() {
                         crate::accessibility::tree(update.clone()).expect(
                             "Real Servo accessibility tree must convert without losing semantics",
                         );
                     }
 
-                    if self.accessibility.active && id == self.tab().view.id() {
+                    if self.accessibility.active && self.tab().id() == Some(id) {
                         self.accessibility.pending.push((id, update));
                     }
                 }
@@ -780,8 +1005,7 @@ impl Browser {
                 }
                 Event::Changed => self.changed(),
                 Event::Closed(id) => {
-                    if let Some(index) = self.session.tabs().iter().position(|t| t.view.id() == id)
-                    {
+                    if let Some(index) = self.tab_index(id) {
                         self.close_tab(index);
                     }
                 }
@@ -790,18 +1014,12 @@ impl Browser {
                         self.features.media_owner = None;
                         self.native_media.clear();
                     }
-                    if let Some(tab) = self
-                        .session
-                        .tabs_mut()
-                        .iter_mut()
-                        .find(|t| t.view.id() == id)
-                    {
-                        tab.crash = Some(reason);
+                    if let Some(index) = self.tab_index(id) {
+                        self.session.tabs_mut()[index].crash = Some(reason);
                     }
                 }
-                Event::Popup(request) => {
-                    let surface =
-                        Rc::new(self.context.offscreen_context(PhysicalSize::new(1000, 700)));
+                Event::Popup(request, opener) => {
+                    let surface = self.tab_surface();
                     let view = request
                         .builder(surface.clone())
                         .user_content_manager(self.content_manager.clone())
@@ -809,21 +1027,27 @@ impl Browser {
                         .clipboard_delegate(Rc::new(engine::Clipboard))
                         .hidpi_scale_factor(euclid::Scale::new(self.window.scale_factor() as f32))
                         .build();
-                    self.session.push(Tab {
-                        view,
-                        surface,
-                        initial_url: "about:blank".into(),
-                        crash: None,
-                        history: Default::default(),
-                    });
-                    self.select_tab(self.session.tabs().len() - 1);
+                    if let Some(opener) = opener {
+                        self.delegate.openers.borrow_mut().insert(view.id(), opener);
+                    }
+                    let index = self.push_tab(
+                        Some(Live { view, surface }),
+                        "about:blank".into(),
+                        String::new(),
+                        true,
+                    );
+                    self.select_tab(index);
                 }
-                Event::Permission(origin, request) => self.permissions.push(
-                    origin,
-                    format!("{:?}", request.feature()),
-                    crate::permission_adapter::Permission(request),
-                ),
-                Event::Authentication(request) => self.authentications.push_back(request),
+                Event::Permission(origin, request) => {
+                    self.dialogs.permissions.push(
+                        origin,
+                        format!("{:?}", request.feature()),
+                        crate::permission_adapter::Permission(request),
+                    );
+                }
+                Event::Authentication(request) => {
+                    self.dialogs.push_authentication(request);
+                }
                 Event::Control(id, servo::EmbedderControl::InputMethod(control)) => {
                     let position = control.position();
                     let scale = self.window.scale_factor();
@@ -840,10 +1064,13 @@ impl Browser {
                     let _ = id;
                 }
                 Event::Control(id, control) => {
-                    self.controls.push_back((id, control));
+                    self.dialogs.push_control(id, control);
                     self.window.request_redraw();
                 }
-                Event::HideControl(id) => self.controls.retain(|(_, control)| control.id() != id),
+                Event::HideControl(id) => self
+                    .dialogs
+                    .controls
+                    .retain(|(_, control)| control.id() != id),
                 Event::Console(id, text) => {
                     let owner = crate::network::owner(id);
                     if !self.tools.debug.contains_key(&owner) {
@@ -873,8 +1100,10 @@ impl Browser {
                     }));
                 }
                 Event::Accessibility(id, nodes) => {
-                    if let Some(tab) = self.session.tabs().iter().find(|t| t.view.id() == id) {
-                        let view = tab.view.clone();
+                    if let Some(view) = self
+                        .tab_index(id)
+                        .and_then(|index| self.session.tabs()[index].view().cloned())
+                    {
                         let page = self.tools.page(&view);
                         for (id, node) in nodes {
                             if page.ax.len() < 2000 || page.ax.contains_key(&id) {
@@ -917,16 +1146,12 @@ impl Browser {
     }
 
     pub(crate) fn animating(&self) -> bool {
-        self.session.tabs().iter().any(|t| t.view.animating())
+        // Hidden views are not painted, so only the selected page drives redraws.
+        self.view().animating()
     }
     pub(crate) fn smoke_testing(&self) -> bool {
         #[cfg(feature = "test-harness")]
-        if self.smoke.is_some()
-            || self.download_test.is_some()
-            || self.toolbox_test.is_some()
-            || self.theme_test.is_some()
-            || self.capabilities_test.is_some()
-        {
+        if self.harness.running() {
             return true;
         }
         self.capture.is_some()
@@ -938,13 +1163,23 @@ impl Browser {
         self.check_smoke_test(event_loop);
     }
 
+    /// The CPU/RAM readout in the status bar is only drawn when the window is visible.
+    fn resources_visible(&self) -> bool {
+        !self.fullscreen && !self.occluded && self.focused
+    }
+
+    /// Work that runs after every batch of events. Nothing here assumes a fixed
+    /// tick rate: `next_wakeup` schedules the next call for every pending deadline.
     pub(crate) fn tick(&mut self) {
         self.pump();
-        if self.resources.refresh() && !self.fullscreen {
+        if self.resources_visible() && self.resources.refresh() {
             self.window.request_redraw();
         }
         let repaint_due = {
-            let mut deadline = self.repaint_deadline.lock().unwrap();
+            let mut deadline = self
+                .repaint_deadline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if deadline.is_some_and(|when| when <= Instant::now()) {
                 *deadline = None;
                 true
@@ -964,6 +1199,46 @@ impl Browser {
         {
             self.save();
         }
+        self.discard_idle_tabs();
+    }
+
+    /// When the event loop must wake without an external event; `None` sleeps until one
+    /// arrives. Servo, automation, devtools and media threads wake the loop themselves.
+    pub(crate) fn next_wakeup(&self) -> Option<Instant> {
+        let now = Instant::now();
+        if self.animating() || self.smoke_testing() || self.tools.pending() {
+            return Some(now + Duration::from_millis(16));
+        }
+        let mut next: Option<Instant> = None;
+        let mut at = |when: Instant| {
+            next = Some(next.map_or(when, |current| current.min(when)));
+        };
+        if let Some(when) = *self
+            .repaint_deadline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            at(when);
+        }
+        if let Some(saved) = self.pending_save {
+            at(saved + Duration::from_millis(1001));
+        }
+        if self.resources_visible() {
+            at(self.resources.next_sample());
+        }
+        if self.tool_window.is_some() {
+            // The detached toolbox mirrors live page state without its own events.
+            at(now + Duration::from_millis(100));
+        } else if self.chrome.show_console {
+            at(now + Duration::from_millis(250));
+        }
+        if let Some(pending) = &self.automation_navigation {
+            at(pending.deadline.min(now + Duration::from_millis(250)));
+        }
+        if let Some(when) = self.next_discard_check(self.discard_timeout()) {
+            at(when);
+        }
+        next.map(|when| when.max(now))
     }
 
     fn page_point(&self) -> servo::WebViewPoint {
@@ -1004,10 +1279,7 @@ impl Browser {
             || self.features.delete_site.is_some()
             || self.chrome.confirm_clear_history
             || !self.features.bluetooth.is_empty()
-            || !self.features.prompts.is_empty()
-            || !self.permissions.is_empty()
-            || !self.authentications.is_empty()
-            || !self.controls.is_empty()
+            || !self.dialogs.is_empty()
     }
 
     fn mouse_button(button: MouseButton) -> servo::MouseButton {
@@ -1026,14 +1298,16 @@ impl Browser {
             self.chrome.pressed_buttons.clear();
             return;
         }
-        for button in std::mem::take(&mut self.chrome.pressed_buttons) {
-            self.tab().view.notify_input_event(InputEvent::MouseButton(
-                servo::MouseButtonEvent::new(
-                    servo::MouseButtonAction::Up,
-                    Self::mouse_button(button),
-                    self.page_point(),
-                ),
-            ));
+        let buttons = std::mem::take(&mut self.chrome.pressed_buttons);
+        let Some(view) = self.tab().view() else {
+            return;
+        };
+        for button in buttons {
+            view.notify_input_event(InputEvent::MouseButton(servo::MouseButtonEvent::new(
+                servo::MouseButtonAction::Up,
+                Self::mouse_button(button),
+                self.page_point(),
+            )));
         }
     }
 
@@ -1060,7 +1334,7 @@ impl Browser {
                 "k" => crate::toolbox::Tool::Console,
                 _ => crate::toolbox::Tool::Inspector,
             };
-            let view = self.tab().view.clone();
+            let view = self.view().clone();
             self.tools.refresh(&view, &self.servo);
             self.window.request_redraw();
             return true;
@@ -1071,7 +1345,7 @@ impl Browser {
                 "l" => {
                     self.chrome.focus_address = true;
                     self.chrome.page_focused = false;
-                    self.tab().view.set_focused(false);
+                    self.view().set_focused(false);
                 }
                 "t" if state.shift_key() => {
                     if let Some(url) = self.chrome.closed_tabs.pop() {
@@ -1130,7 +1404,7 @@ impl Browser {
                     if self.chrome.page_focused {
                         self.chrome.focus_address = true;
                         self.chrome.page_focused = false;
-                        self.tab().view.set_focused(false);
+                        self.view().set_focused(false);
                     } else {
                         if let Some(gui) = &self.gui {
                             gui.egui_ctx.memory_mut(|m| {
@@ -1140,7 +1414,7 @@ impl Browser {
                             });
                         }
                         self.chrome.page_focused = true;
-                        self.tab().view.set_focused(true);
+                        self.view().set_focused(true);
                     }
                 }
                 Key::Named(NamedKey::Escape)
@@ -1174,7 +1448,7 @@ impl Browser {
                     self.traverse(true);
                 }
                 Key::Named(NamedKey::Escape) if self.fullscreen => {
-                    self.tab().view.exit_fullscreen();
+                    self.view().exit_fullscreen();
                     self.window.set_fullscreen(None);
                     self.fullscreen = false;
                 }
@@ -1187,9 +1461,7 @@ impl Browser {
     }
 
     pub(crate) fn zoom(&mut self, factor: f32) {
-        if let Err(error) =
-            self.dispatch_navigation(servo_browser::navigation::Command::Zoom { factor })
-        {
+        if let Err(error) = self.dispatch_navigation(wega::navigation::Command::Zoom { factor }) {
             self.status = Some(error);
         }
     }
@@ -1204,7 +1476,7 @@ impl Browser {
                 return;
             }
             if self.chrome.page_focused && !self.modal() {
-                input::keyboard(&self.tab().view, event, self.chrome.modifiers);
+                input::keyboard(self.view(), event, self.chrome.modifiers);
                 self.pump();
                 return;
             }
@@ -1226,9 +1498,8 @@ impl Browser {
                 self.window.request_redraw();
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                for tab in self.session.tabs() {
-                    tab.view
-                        .set_hidpi_scale_factor(euclid::Scale::new(scale_factor as f32));
+                for view in self.session.tabs().iter().filter_map(Tab::view) {
+                    view.set_hidpi_scale_factor(euclid::Scale::new(scale_factor as f32));
                 }
                 self.window.request_redraw();
             }
@@ -1239,22 +1510,19 @@ impl Browser {
                     && !self.modal()
                     && !self.ui_blocks_pointer()
                 {
-                    self.tab().view.notify_input_event(InputEvent::MouseMove(
+                    self.view().notify_input_event(InputEvent::MouseMove(
                         servo::MouseMoveEvent::new(self.page_point()),
                     ));
-                    self.window
-                        .set_cursor(input::cursor(self.tab().view.cursor()));
+                    self.window.set_cursor(input::cursor(self.view().cursor()));
                 } else if was_over {
-                    self.tab()
-                        .view
+                    self.view()
                         .notify_input_event(InputEvent::MouseLeftViewport(
                             servo::MouseLeftViewportEvent::default(),
                         ));
                 }
             }
             WindowEvent::CursorLeft { .. } => {
-                self.tab()
-                    .view
+                self.view()
                     .notify_input_event(InputEvent::MouseLeftViewport(
                         servo::MouseLeftViewportEvent::default(),
                     ));
@@ -1274,9 +1542,9 @@ impl Browser {
                             .unwrap()
                             .egui_ctx
                             .memory_mut(|m| m.surrender_focus(egui::Id::unique("address")));
-                        self.tab().view.set_focused(true);
+                        self.view().set_focused(true);
                     }
-                    self.tab().view.notify_input_event(InputEvent::MouseButton(
+                    self.view().notify_input_event(InputEvent::MouseButton(
                         servo::MouseButtonEvent::new(
                             if up {
                                 servo::MouseButtonAction::Up
@@ -1289,7 +1557,7 @@ impl Browser {
                     ));
                 } else if !up {
                     self.chrome.page_focused = false;
-                    self.tab().view.set_focused(false);
+                    self.view().set_focused(false);
                 }
             }
             WindowEvent::MouseWheel { delta, .. }
@@ -1306,8 +1574,7 @@ impl Browser {
                     }
                     MouseScrollDelta::PixelDelta(p) => (p.x, p.y, servo::WheelMode::DeltaPixel),
                 };
-                self.tab()
-                    .view
+                self.view()
                     .notify_input_event(InputEvent::Wheel(servo::WheelEvent::new(
                         servo::WheelDelta { x, y, z: 0.0, mode },
                         self.page_point(),
@@ -1319,8 +1586,7 @@ impl Browser {
                     self.chrome.pointer.x as f32 - self.chrome.page_rect.min.x * scale,
                     self.chrome.pointer.y as f32 - self.chrome.page_rect.min.y * scale,
                 );
-                self.tab()
-                    .view
+                self.view()
                     .adjust_pinch_zoom((1.0 + delta as f32).max(0.01), center);
                 self.window.request_redraw();
             }
@@ -1329,7 +1595,7 @@ impl Browser {
                     Ime::Preedit(text, _) => {
                         if !self.chrome.ime_composing {
                             self.chrome.ime_composing = true;
-                            self.tab().view.notify_input_event(InputEvent::Ime(
+                            self.view().notify_input_event(InputEvent::Ime(
                                 servo::ImeEvent::Composition(servo::CompositionEvent {
                                     state: servo::CompositionState::Start,
                                     data: String::new(),
@@ -1347,8 +1613,7 @@ impl Browser {
                         return;
                     }
                 };
-                self.tab()
-                    .view
+                self.view()
                     .notify_input_event(InputEvent::Ime(servo::ImeEvent::Composition(
                         servo::CompositionEvent { state, data },
                     )));
@@ -1361,10 +1626,18 @@ impl Browser {
                     self.set_theme(&ctx, self.profile().theme);
                 }
             }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if !occluded {
+                    self.window.request_redraw();
+                }
+            }
+            WindowEvent::Focused(true) => self.focused = true,
             WindowEvent::Focused(false) => {
+                self.focused = false;
                 self.release_pointer();
                 self.chrome.page_focused = false;
-                self.tab().view.set_focused(false);
+                self.view().set_focused(false);
             }
             _ => {}
         }
@@ -1386,7 +1659,7 @@ impl Browser {
         self.flush_accessibility(&mut gui);
         // Servo may bind its framebuffer while painting. Restore the window target before egui.
         if self.tab().crash.is_none() {
-            self.tab().view.paint();
+            self.view().paint();
         }
         self.context.prepare_for_rendering();
         gui.painter.clear(
@@ -1422,7 +1695,7 @@ impl Browser {
             }
         }
         #[cfg(feature = "test-harness")]
-        if self.smoke.as_ref().is_some_and(|s| {
+        if self.harness.smoke.as_ref().is_some_and(|s| {
             ((8..=10).contains(&s.stage) && s.stage_at.elapsed() > Duration::from_millis(300))
                 || (s.stage == 7 && self.profile().layout == TabLayout::Top)
         }) {
@@ -1431,7 +1704,7 @@ impl Browser {
                 .join(if self.profile().layout == TabLayout::Top {
                     "smoke-top-tabs.png"
                 } else {
-                    match self.smoke.as_ref().unwrap().stage {
+                    match self.harness.smoke.as_ref().unwrap().stage {
                         9 => "smoke-history.png",
                         10 => "smoke-bookmarks.png",
                         _ => "smoke-window.png",
@@ -1451,7 +1724,7 @@ impl Browser {
             }
         }
         #[cfg(feature = "test-harness")]
-        if let Some(test) = &self.toolbox_test
+        if let Some(test) = &self.harness.toolbox_test
             && let Some(name) = &test.capture
             && !name.starts_with("detached-")
         {
@@ -1467,7 +1740,7 @@ impl Browser {
             }
         }
         #[cfg(feature = "test-harness")]
-        if let Some(test) = &mut self.capabilities_test
+        if let Some(test) = &mut self.harness.capabilities_test
             && test.frame_ready()
             && let Some(output) = &test.frame_output
         {
@@ -1482,7 +1755,7 @@ impl Browser {
             }
         }
         #[cfg(feature = "test-harness")]
-        if let Some(test) = &mut self.theme_test
+        if let Some(test) = &mut self.harness.theme_test
             && !test.frame_checked
             && let Some(output) = &test.output
         {
@@ -1550,10 +1823,10 @@ impl Browser {
             (rect.width() * scale).round().max(1.0) as u32,
             (rect.height() * scale).round().max(1.0) as u32,
         );
-        if self.tab().surface.size() != size {
-            self.tab().view.resize(size);
+        if self.live().surface.size() != size {
+            self.view().resize(size);
         }
-        if let Some(blit) = self.tab().surface.render_to_parent_callback() {
+        if let Some(blit) = self.live().surface.render_to_parent_callback() {
             ui.painter().add(egui::PaintCallback {
                 rect,
                 callback: Arc::new(egui_glow::CallbackFn::new(move |info, painter| {
@@ -1579,15 +1852,41 @@ impl Browser {
         let _ = self.context.make_current();
         self.save();
         self.tools.shutdown();
-        self.permissions.clear();
-        self.authentications.clear();
-        self.controls.clear();
+        self.dialogs.clear();
         self.session.clear();
         self.delegate.events.borrow_mut().clear();
         self.servo.spin_event_loop();
         let _ = self.context.make_current();
         if let Some(gui) = &mut self.gui {
             gui.destroy();
+        }
+    }
+}
+
+/// Encode a small RGBA favicon as PNG for the profile.
+fn encode_favicon(width: usize, height: usize, rgba: Vec<u8>) -> Option<Vec<u8>> {
+    let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba)?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .ok()?;
+    Some(png)
+}
+
+/// Pixels of a saved favicon, decoding the PNG form.
+fn decode_favicon(icon: &profile::SavedFavicon) -> Option<(usize, usize, Vec<u8>)> {
+    match icon {
+        profile::SavedFavicon::Rgba {
+            width,
+            height,
+            rgba,
+        } => Some((*width, *height, rgba.clone())),
+        profile::SavedFavicon::Png(png) => {
+            let image = image::load_from_memory_with_format(png, image::ImageFormat::Png)
+                .ok()?
+                .into_rgba8();
+            let (width, height) = image.dimensions();
+            Some((width as usize, height as usize, image.into_raw()))
         }
     }
 }

@@ -1,6 +1,8 @@
 // The list of plugin libraries themselves, used for both MacOS and Windows.
 // The format of this file is intended to be directly `include!()` able as a [&'static str] in Rust,
 // and a valid python list[str] after stripping the `//` comments at the beginning of lines (from gstreamer.py).
+// Modified by Wega contributors, 2026: removed "gstlibav" (FFmpeg) so release bundles carry
+// no GPL or patent-encumbered codecs; macOS decodes through gstapplemedia instead.
 [
 // gstreamer
 "gstcoreelements",
@@ -40,6 +42,4 @@
 "gstproxy",
 "gstvideoparsersbad",
 "gstwebrtc",
-// gst-libav
-"gstlibav",
 ]

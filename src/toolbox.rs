@@ -172,13 +172,15 @@ pub struct Toolbox {
     pub panel_rect: egui::Rect,
 }
 impl Toolbox {
-    pub fn new(proxy: winit::event_loop::EventLoopProxy<crate::engine::Wake>) -> Self {
+    pub fn new(
+        proxy: winit::event_loop::EventLoopProxy<crate::engine::Wake>,
+    ) -> Result<Self, String> {
         let (sender, replies) = crossbeam_channel::unbounded();
         let mut network = Recorder::default();
         network.show_initiator = true;
         network.show_transferred = true;
-        Self {
-            bridge: Bridge::new(proxy),
+        Ok(Self {
+            bridge: Bridge::new(proxy)?,
             log: Default::default(),
             driver: Default::default(),
             environments: HashMap::new(),
@@ -206,7 +208,7 @@ impl Toolbox {
             notice_seen: None,
             attention: None,
             panel_rect: egui::Rect::NOTHING,
-        }
+        })
     }
     pub fn transient_notice(&mut self) -> Option<(String, Duration)> {
         let Some(text) = self.notice.clone() else {
@@ -261,7 +263,7 @@ impl Toolbox {
         self.next += 1;
         let token = self.next;
         let script = format!(
-            "globalThis.__servoToolResults ||= Object.create(null);Promise.resolve().then(async()=>{{{body}}}).then(value=>{{globalThis.__servoToolResults[{token}]={{ok:true,value}}}},error=>{{globalThis.__servoToolResults[{token}]={{ok:false,error:String(error)}}}});'queued'"
+            "globalThis.__wegaToolResults ||= Object.create(null);Promise.resolve().then(async()=>{{{body}}}).then(value=>{{globalThis.__wegaToolResults[{token}]={{ok:true,value}}}},error=>{{globalThis.__wegaToolResults[{token}]={{ok:false,error:String(error)}}}});'queued'"
         );
         let sender = self.sender.clone();
         view.evaluate_javascript(script, move |value| {
@@ -897,7 +899,7 @@ impl Toolbox {
             let job = self.jobs.remove(index);
             if job.view.url().map(|u| u.to_string()).unwrap_or_default() == job.url {
                 job.view.evaluate_javascript(
-                    format!("delete globalThis.__servoToolResults?.[{}]", job.token),
+                    format!("delete globalThis.__wegaToolResults?.[{}]", job.token),
                     |_| {},
                 );
                 self.complete(owner, tool, value);
@@ -914,7 +916,7 @@ impl Toolbox {
                 let token = job.token;
                 let sender = self.sender.clone();
                 job.view.evaluate_javascript(
-                    format!("JSON.stringify(globalThis.__servoToolResults?.[{token}]??null)"),
+                    format!("JSON.stringify(globalThis.__wegaToolResults?.[{token}]??null)"),
                     move |result| {
                         let value = match result {
                             Ok(servo::JSValue::String(text)) if text.len() <= 2 * 1024 * 1024 => {

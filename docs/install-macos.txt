@@ -1,0 +1,29 @@
+Install Wega on macOS (Apple Silicon)
+
+1. Drag Wega.app to the Applications folder shortcut in this disk image.
+2. Eject the Wega Browser disk image.
+3. Open Applications in Finder, then double-click Wega.
+
+This alpha release is ad-hoc signed and is not notarized by Apple. macOS may
+display "Apple could not verify Wega is free of malware". The app has not been
+submitted to Apple's notarization service.
+
+If you trust this specific download, you can approve it yourself:
+try opening the installed Wega.app, dismiss the warning, then open System
+Settings > Privacy & Security. Scroll down to Security and select Open Anyway
+for Wega. Confirm the subsequent prompt yourself. Apple says this option is
+available for about an hour after the blocked launch attempt.
+
+If Wega does not appear there, make sure you tried opening Wega.app from
+Applications, rather than only opening the DMG. As an alternative to the DMG,
+download the ZIP release, extract it and copy Wega.app to Applications.
+
+You do not need an Apple Developer Program membership to run this build.
+The publisher needs membership for Developer ID signing and notarization.
+Do not disable Gatekeeper globally to install Wega.
+
+Apple's instructions:
+https://support.apple.com/102445
+
+Wega releases:
+https://github.com/wulfnb/wega/releases

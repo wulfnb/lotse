@@ -9,21 +9,20 @@ use winit::{
 
 impl Browser {
     fn smoke_stage(&mut self, stage: u8) {
-        let smoke = self.smoke.as_mut().unwrap();
+        let smoke = self.harness.smoke.as_mut().unwrap();
         smoke.stage = stage;
         smoke.stage_at = Instant::now();
     }
 
     fn smoke_evaluate(&mut self, script: &str, next_stage: u8) {
-        let result = self.smoke.as_ref().unwrap().result.clone();
-        self.tab()
-            .view
+        let result = self.harness.smoke.as_ref().unwrap().result.clone();
+        self.view()
             .evaluate_javascript(script, move |value| *result.borrow_mut() = Some(value));
         self.smoke_stage(next_stage);
     }
 
     fn smoke_result(&self) -> Option<String> {
-        let result = self.smoke.as_ref()?.result.borrow_mut().take()?;
+        let result = self.harness.smoke.as_ref()?.result.borrow_mut().take()?;
         match result {
             Ok(JSValue::String(text)) => Some(text),
             result => {
@@ -84,7 +83,7 @@ impl Browser {
         });
         self.handle_event(WindowEvent::RedrawRequested);
         assert_eq!(
-            self.session().tabs()[to].view.id(),
+            self.session().tabs()[to].key,
             source_id,
             "Dragging must reorder the actual UI tabs"
         );
@@ -95,7 +94,7 @@ impl Browser {
         self.check_toolbox_test(event_loop);
         self.check_theme_test(event_loop);
         self.check_capabilities_test(event_loop);
-        let Some(smoke) = &self.smoke else {
+        let Some(smoke) = &self.harness.smoke else {
             return;
         };
         if smoke.start.elapsed() > Duration::from_secs(90) {
@@ -103,13 +102,13 @@ impl Browser {
                 "SMOKE TEST FAILED: timeout at stage {}, url={}, title={:?}",
                 smoke.stage,
                 self.tab().url(),
-                self.tab().view.page_title()
+                self.view().page_title()
             );
             std::process::exit(1);
         }
         let stage = smoke.stage;
-        let complete = self.tab().view.load_status() == LoadStatus::Complete;
-        let title = self.tab().view.page_title().unwrap_or_default();
+        let complete = self.view().load_status() == LoadStatus::Complete;
+        let title = self.view().page_title().unwrap_or_default();
         match stage {
             0 if complete
                 && title == "Servo interaction fixture"
@@ -128,7 +127,7 @@ impl Browser {
                 self.smoke_click(coords[1][0], coords[1][1]);
                 for character in "Servo typed".chars() {
                     for state in [servo::KeyState::Down, servo::KeyState::Up] {
-                        self.tab().view.notify_input_event(InputEvent::Keyboard(
+                        self.view().notify_input_event(InputEvent::Keyboard(
                             servo::KeyboardEvent::from_state_and_key(
                                 state,
                                 servo::Key::Character(character.to_string()),
@@ -148,7 +147,7 @@ impl Browser {
                 self.window.request_redraw();
             }
             2 if smoke.stage_at.elapsed() > Duration::from_millis(600) => {
-                self.smoke_evaluate("window.__lotseSmokeOldDocument = true; JSON.stringify({button:document.querySelector('#counter').textContent, input:document.querySelector('#input').value, scrolled:window.scrollY>0, gradientColor:getComputedStyle(document.querySelector('#gradient-probe')).color, brandColor:getComputedStyle(document.querySelector('#brand-gradient')).color, gradientBackground:getComputedStyle(document.querySelector('#gradient-probe')).backgroundImage, normalBackground:getComputedStyle(document.querySelector('#normal-gradient')).backgroundImage})", 3);
+                self.smoke_evaluate("window.__wegaSmokeOldDocument = true; JSON.stringify({button:document.querySelector('#counter').textContent, input:document.querySelector('#input').value, scrolled:window.scrollY>0, gradientColor:getComputedStyle(document.querySelector('#gradient-probe')).color, brandColor:getComputedStyle(document.querySelector('#brand-gradient')).color, gradientBackground:getComputedStyle(document.querySelector('#gradient-probe')).backgroundImage, normalBackground:getComputedStyle(document.querySelector('#normal-gradient')).backgroundImage})", 3);
             }
             3 => {
                 let Some(text) = self.smoke_result() else {
@@ -209,7 +208,7 @@ impl Browser {
             // and navigation callbacks are queued. Wait for document replacement,
             // rather than assuming a fixed delay means the reload has finished.
             11 if complete && smoke.stage_at.elapsed() > Duration::from_millis(50) => {
-                self.smoke_evaluate("JSON.stringify({oldDocument:window.__lotseSmokeOldDocument===true,ready:document.readyState,count:window.count,input:document.querySelector('#input')?.value})",12);
+                self.smoke_evaluate("JSON.stringify({oldDocument:window.__wegaSmokeOldDocument===true,ready:document.readyState,count:window.count,input:document.querySelector('#input')?.value})",12);
             }
             12 => {
                 let Some(text) = self.smoke_result() else {
@@ -228,28 +227,27 @@ impl Browser {
                     "The refresh toolbar button must reload the document"
                 );
                 assert_eq!(data["input"], "", "Refresh must reset page input state");
-                let url = self.tab().view.url().unwrap().join("second.html").unwrap();
+                let url = self.view().url().unwrap().join("second.html").unwrap();
                 self.navigate(url.as_str());
                 self.smoke_stage(4);
             }
             // History updates arrive separately from the document's load/title
             // callbacks. Await both, within the suite's existing 90s timeout.
-            4 if complete && title == "Second Servo document" && self.tab().view.can_go_back() => {
-                assert!(self.tab().view.can_go_back());
+            4 if complete && title == "Second Servo document" && self.view().can_go_back() => {
+                assert!(self.view().can_go_back());
                 self.traverse(false);
                 self.smoke_stage(5);
             }
             5 if complete
                 && title == "Servo interaction fixture"
-                && self.tab().view.can_go_forward() =>
+                && self.view().can_go_forward() =>
             {
-                assert!(self.tab().view.can_go_forward());
+                assert!(self.view().can_go_forward());
                 self.traverse(true);
                 self.smoke_stage(6);
             }
             6 if complete && title == "Second Servo document" => {
-                self.tab()
-                    .view
+                self.view()
                     .evaluate_javascript("window.open('interaction.html')", |_| {});
                 self.smoke_stage(7);
             }
@@ -257,9 +255,9 @@ impl Browser {
                 && complete
                 && title == "Servo interaction fixture" =>
             {
-                let active_id = self.tab().view.id();
+                let active_id = self.view().id();
                 self.smoke_drag_tab(1, 0);
-                assert_eq!(self.tab().view.id(), active_id);
+                assert_eq!(self.view().id(), active_id);
                 self.toggle_layout();
                 self.handle_event(WindowEvent::RedrawRequested);
                 let center = self.chrome.tab_rects[0].1.center().y;
@@ -272,15 +270,15 @@ impl Browser {
                     self.chrome.tab_rects
                 );
                 self.smoke_drag_tab(0, 1);
-                assert_eq!(self.tab().view.id(), active_id);
+                assert_eq!(self.view().id(), active_id);
                 self.close_tab(0);
                 self.toggle_layout();
-                assert_eq!(self.tab().view.id(), active_id);
+                assert_eq!(self.view().id(), active_id);
                 self.bookmark();
                 self.zoom(1.25);
-                assert!((self.tab().view.page_zoom() - 1.25).abs() < 0.001);
+                assert!((self.view().page_zoom() - 1.25).abs() < 0.001);
                 self.reset_zoom();
-                assert!((self.tab().view.page_zoom() - 1.0).abs() < 0.001);
+                assert!((self.view().page_zoom() - 1.0).abs() < 0.001);
                 self.save();
                 let restored = profile::Profile::load(&self.profile_dir).unwrap();
                 assert_eq!(restored.urls, vec![self.tab().url()]);
@@ -291,9 +289,9 @@ impl Browser {
                 self.window.request_redraw();
             }
             8 if smoke.stage_at.elapsed() > Duration::from_millis(600) => {
-                let surface = &self.tab().surface;
+                let surface = &self.live().surface;
                 surface.make_current().expect("Smoke GPU context");
-                self.tab().view.paint();
+                self.view().paint();
                 use servo::RenderingContext;
                 let size = surface.size();
                 let rect = servo::DeviceIntRect::from_size(servo::DeviceIntSize::new(
@@ -336,7 +334,7 @@ impl Browser {
                 println!(
                     "SMOKE TEST PASSED: Servo HTML/CSS/JS, native mouse routing, typing, scrolling, back/forward, popup tabs, top/side layouts, reorder, close, bookmarks, profile round-trip, console, toolbar reload, readable gradient text, unchanged regular gradients, aligned library panels, GPU pixels"
                 );
-                self.smoke = None;
+                self.harness.smoke = None;
                 event_loop.exit();
             }
             _ => {}

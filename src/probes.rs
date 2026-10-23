@@ -1,7 +1,7 @@
 //! Page-side probes used only when the user opens a developer tool.
 pub const INSPECTOR: &str = include_str!("inspector.js");
 pub const PERFORMANCE: &str = r#"
-const c=globalThis.__servoPerfRecording;
+const c=globalThis.__wegaPerfRecording;
 let raw=performance.getEntries();
 if(c){raw=[...raw,...c.entries];raw=raw.filter(e=>e.startTime>=c.start);}
 const seen=new Set();raw=raw.filter(e=>{const k=JSON.stringify([e.entryType,e.name,e.startTime,e.duration]);if(seen.has(k))return false;seen.add(k);return true;});
@@ -43,16 +43,16 @@ pub fn edit_css(index: i32, css: &str) -> String {
     format!(
         r#"const index={index};
 const original=document.styleSheets[index];
-globalThis.__servoEditorSheets ||= new Map();
-if(original){{if(!__servoEditorSheets.has(original))__servoEditorSheets.set(original,original.disabled);original.disabled=true;}}
-let style=document.querySelector('style[data-servo-editor="'+index+'"]');
-if(!style){{style=document.createElement('style');style.dataset.servoEditor=String(index);document.head.append(style);}}
+globalThis.__wegaEditorSheets ||= new Map();
+if(original){{if(!__wegaEditorSheets.has(original))__wegaEditorSheets.set(original,original.disabled);original.disabled=true;}}
+let style=document.querySelector('style[data-wega-editor="'+index+'"]');
+if(!style){{style=document.createElement('style');style.dataset.wegaEditor=String(index);document.head.append(style);}}
 style.textContent={};return style.textContent;"#,
         crate::toolbox::quote(css)
     )
 }
 pub const RESET_CSS: &str = r#"
-document.querySelectorAll('style[data-servo-editor]').forEach(e=>e.remove());
-if(globalThis.__servoEditorSheets){for(const [sheet,disabled] of __servoEditorSheets)sheet.disabled=disabled;__servoEditorSheets.clear();}
+document.querySelectorAll('style[data-wega-editor]').forEach(e=>e.remove());
+if(globalThis.__wegaEditorSheets){for(const [sheet,disabled] of __wegaEditorSheets)sheet.disabled=disabled;__wegaEditorSheets.clear();}
 return '';
 "#;

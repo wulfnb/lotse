@@ -34,7 +34,7 @@ class PortableWrapperTests(unittest.TestCase):
             wrapper = Path(directory) / ('wrapper.exe' if os.name == 'nt' else 'wrapper')
             subprocess.run(['rustc', str(ROOT / 'scripts/coverage-rustc.rs'), '--edition=2024', '-o', str(wrapper)], check=True)
             for branch in ['0','1']:
-                env = dict(os.environ, LOTSE_COVERAGE_BRANCH=branch)
+                env = dict(os.environ, WEGA_COVERAGE_BRANCH=branch)
                 output = subprocess.check_output([str(wrapper), sys.executable, '-c', 'import json,sys; print(json.dumps(sys.argv[1:]))', 'literal argument with spaces', '$not_a_shell'], env=env, text=True)
                 args = json.loads(output)
                 self.assertEqual(args[:2], ['literal argument with spaces', '$not_a_shell'])
@@ -99,7 +99,7 @@ class CoverageGateTests(unittest.TestCase):
             (root / 'src/covered.rs').write_text('fn covered() {}')
             (root / 'src/missing.js').write_text('console.log("not tested")')
             (root / 'src/example_tests.rs').write_text('fn test() {}')
-            (root / 'src/brand.rs').write_text('const NAME: &str = "Lotse";')
+            (root / 'src/brand.rs').write_text('const NAME: &str = "Wega";')
             policy = {'include': ['src/*'], 'test_only': ['src/*_tests.rs'], 'declaration_only': ['src/brand.rs'], 'required_builds': ['test:desktop'], 'target_line_percent': 100}
             rust = {'data': [{'files': [{'filename': str(root / 'src/covered.rs'), 'summary': {'lines': {'count': 1, 'covered': 1}}}]}]}
             report = accounting.inventory(root, policy, [(rust, {'platform': 'host: test', 'core_only': False})], {})
@@ -190,8 +190,8 @@ class CoverageGateTests(unittest.TestCase):
         self.assertEqual(accounting.percent(None), 'unmeasured')
         self.assertEqual(accounting.percent({'count': 0, 'covered': 0}), 'no counters')
         self.assertIsNone(accounting.relative('/outside/workspace', Path('/tmp/project')))
-        self.assertEqual(accounting.relative('C:/work/lotse/src/profile.rs', 'C:/work/lotse'), 'src/profile.rs')
-        self.assertIsNone(accounting.relative('C:/outside/profile.rs', 'C:/work/lotse'))
+        self.assertEqual(accounting.relative('C:/work/wega/src/profile.rs', 'C:/work/wega'), 'src/profile.rs')
+        self.assertIsNone(accounting.relative('C:/outside/profile.rs', 'C:/work/wega'))
 
 
 @unittest.skipUnless(sys.platform == 'darwin', 'Continuous mmap coverage is validated on Darwin')
@@ -199,7 +199,7 @@ class ContinuousCounterTests(unittest.TestCase):
     def test_terminated_process_retains_nonzero_profile_counters(self):
         import os
         import subprocess
-        with tempfile.TemporaryDirectory(prefix='lotse-counter-test-') as directory:
+        with tempfile.TemporaryDirectory(prefix='wega-counter-test-') as directory:
             root = Path(directory)
             source = root / 'probe.rs'
             source.write_text('fn main() { println!("ready"); std::thread::sleep(std::time::Duration::from_secs(30)); }')

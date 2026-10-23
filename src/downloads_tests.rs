@@ -82,7 +82,7 @@ impl Drop for Server {
 fn manager() -> (Manager, PathBuf) {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     let root = std::env::temp_dir().join(format!(
-        "servo-download-test-{}-{}-{}",
+        "wega-download-test-{}-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -175,7 +175,7 @@ fn filenames_and_urls_are_safe() {
     assert_eq!(safe_filename("prn.pdf"), "_prn.pdf");
     assert_eq!(decode("%aé"), "%aé");
     assert_eq!(decode("caf%C3%A9+one"), "café+one");
-    let root = std::env::temp_dir().join(format!("servo-publish-{}", std::process::id()));
+    let root = std::env::temp_dir().join(format!("wega-publish-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).unwrap();
     let body = root.join("source");
@@ -470,4 +470,97 @@ fn multipart_reuses_complete_segments_and_bounds_work_before_launching_workers()
             .contains("Interrupted")
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn published_files_are_marked_and_leave_no_temporary_files() {
+    let server = Server::new(false, false);
+    let (mut m, root) = manager();
+    let marks = Arc::new(Mutex::new(Vec::new()));
+    let seen = marks.clone();
+    m.marker = Some(Arc::new(move |path: &Path, url: &str| {
+        seen.lock()
+            .unwrap()
+            .push((path.to_path_buf(), url.to_owned()));
+    }));
+    m.start(&server.url, "", 1, String::new()).unwrap();
+    let p = finished(&m.jobs().pop().unwrap());
+    assert_eq!(p.phase, Phase::Complete, "{}", p.message);
+    assert_eq!(
+        *marks.lock().unwrap(),
+        [(p.path.clone().unwrap(), server.url.clone())]
+    );
+    let leftovers: Vec<_> = fs::read_dir(&m.directory)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with('.'))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+    drop(m);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn a_poisoned_progress_lock_does_not_panic_readers() {
+    let job = Arc::new(Job {
+        url: "https://example.com/".into(),
+        progress: Mutex::new(Progress {
+            phase: Phase::Downloading,
+            filename: "a".into(),
+            total: None,
+            connections: 1,
+            message: String::new(),
+            path: None,
+        }),
+        command: AtomicU8::new(RUN),
+        completed: AtomicU64::new(0),
+        inflight: Vec::new(),
+        started: Instant::now(),
+    });
+    let poisoner = job.clone();
+    let _ = thread::spawn(move || {
+        let _guard = poisoner.progress.lock().unwrap();
+        panic!("worker panic while holding progress");
+    })
+    .join();
+    assert!(job.progress.is_poisoned());
+    assert_eq!(job.snapshot().phase, Phase::Downloading);
+    job.phase(Phase::Failed, "recovered");
+    assert_eq!(job.snapshot().message, "recovered");
+}
+
+#[test]
+fn curl_is_resolved_from_system_directories_only() {
+    for candidate in curl_candidates() {
+        assert!(candidate.is_absolute(), "{}", candidate.display());
+    }
+    if let Some(path) = curl_program() {
+        assert!(path.is_absolute() && path.is_file());
+    }
+}
+
+#[test]
+fn mark_of_the_web_metadata_and_program_detection() {
+    assert_eq!(
+        zone_identifier("https://example.com/a.exe\r\nZoneId=0"),
+        "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://example.com/a.exeZoneId=0\r\nHostUrl=https://example.com/a.exeZoneId=0\r\n"
+    );
+    assert_eq!(quarantine_value(0x6500_0000, "Wega"), "0081;65000000;Wega;");
+    for name in [
+        "Setup.EXE",
+        "a.app",
+        "run.sh",
+        "x.command",
+        "i.pkg",
+        "d.dmg",
+        "s.ps1",
+        "j.jar",
+        "l.desktop",
+        "b.AppImage",
+    ] {
+        assert!(opens_as_program(Path::new(name)), "{name}");
+    }
+    for name in ["photo.png", "doc.pdf", "archive.zip", "README", "notes.txt"] {
+        assert!(!opens_as_program(Path::new(name)), "{name}");
+    }
 }

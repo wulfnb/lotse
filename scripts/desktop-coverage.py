@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """Measure first-party Rust from unit tests AND real engine suites.
 
-RUSTC_WORKSPACE_WRAPPER instruments Lotse only; third-party crates keep their
+RUSTC_WORKSPACE_WRAPPER instruments Wega only; third-party crates keep their
 normal flags. LLVM_PROFILE_FILE is inherited by browsers started by Python tests.
 """
 import argparse
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
@@ -16,9 +15,7 @@ import shutil
 from coverage_sources import fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
-# These are test drivers, not application implementations. An exact list prevents
-# names like inspector.rs from accidentally disappearing from the denominator.
-HARNESS = ['smoke.rs', 'download_test.rs', 'theme_test.rs', 'capabilities_test.rs', 'toolbox_test.rs']
+# Native test drivers live in src/harness/ and are not application implementations.
 
 
 def collect_artifacts(path):
@@ -53,7 +50,7 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     raw = output / 'raw'
     raw.mkdir(exist_ok=True)
-    branch = os.environ.get('LOTSE_COVERAGE_BRANCH') == '1'
+    branch = os.environ.get('WEGA_COVERAGE_BRANCH') == '1'
     env = os.environ.copy()
     wrapper = output / ('rustc-wrapper.exe' if os.name == 'nt' else 'rustc-wrapper')
     env.update(RUSTC_WORKSPACE_WRAPPER=str(wrapper), LLVM_PROFILE_FILE=str(raw / ('%m-%p%c.profraw' if sys.platform == 'darwin' else '%m-%p.profraw')))
@@ -124,7 +121,7 @@ def main(argv=None):
     coverage_tool = llvm / ('llvm-cov' + suffix)
     merged = output / 'coverage.profdata'
     subprocess.run([str(profdata_tool), 'merge', '-sparse', *map(str, profiles), '-o', str(merged)], check=True)
-    ignore = r'(/vendor/|/tests/|_tests\.rs$|/src/(' + '|'.join(re.escape(name) for name in HARNESS) + r')$)'
+    ignore = r'(/vendor/|/tests/|_tests\.rs$|/src/harness/)'
     common = [objects[0], *[arg for obj in objects[1:] for arg in ['--object', obj]], '--instr-profile', str(merged), '--ignore-filename-regex', ignore]
     for kind, arguments, destination in [('export', [], 'coverage.json'), ('export', ['--format=lcov'], 'lcov.info'), ('report', [], 'summary.txt')]:
         with (output / destination).open('w') as stream:

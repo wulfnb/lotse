@@ -14,7 +14,7 @@ impl Test {
 }
 impl crate::browser::Browser {
     pub fn check_download_test(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Some(test) = &self.download_test else {
+        let Some(test) = &self.harness.download_test else {
             return;
         };
         assert!(
@@ -23,12 +23,11 @@ impl crate::browser::Browser {
             test.stage
         );
         match test.stage {
-            0 if self.tab().view.page_title().as_deref() == Some("Download fixture")
-                && self.tab().view.load_status() == servo::LoadStatus::Complete =>
+            0 if self.view().page_title().as_deref() == Some("Download fixture")
+                && self.view().load_status() == servo::LoadStatus::Complete =>
             {
-                self.download_test.as_mut().unwrap().stage = 1;
-                self.tab()
-                    .view
+                self.harness.download_test.as_mut().unwrap().stage = 1;
+                self.view()
                     .evaluate_javascript("document.querySelector('#download').click()", |_| {});
             }
             1 if self.download_ui.open => {
@@ -40,11 +39,11 @@ impl crate::browser::Browser {
                     1,
                     "Download starts through the native confirmation UI"
                 );
-                self.download_test.as_mut().unwrap().stage = 2;
+                self.harness.download_test.as_mut().unwrap().stage = 2;
             }
             2 => {
                 let job = self.downloads.jobs()[0].clone();
-                let progress = job.progress.lock().unwrap().clone();
+                let progress = job.snapshot();
                 assert_ne!(
                     progress.phase,
                     crate::downloads::Phase::Failed,
@@ -61,7 +60,7 @@ impl crate::browser::Browser {
                 println!(
                     "DOWNLOAD TEST PASSED: page download link, native confirmation, HttpOnly site-cookie reuse, four parallel connections, exact file bytes and safe publication"
                 );
-                self.download_test = None;
+                self.harness.download_test = None;
                 event_loop.exit();
             }
             _ => {}

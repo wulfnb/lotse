@@ -1,4 +1,4 @@
-# Lotse UI/UX review — 22 October 2026
+# Wega UI/UX review — 22 October 2026
 
 Implementation status: all 16 findings now have code changes. See
 [implementation and verification](ui-ux-implementation.md). The observations
@@ -20,7 +20,7 @@ preserved. No application code was changed for this review.
 - Visually inspected current captures of history, Paper, Glass Light, Midnight,
   Network, Debugger, and right-docked Inspector. The theme suite exported all six
   themes. These are macOS captures, primarily at the default 1280-point window.
-- Captured Paper with `lotse://newtab` and the local website in the current
+- Captured Paper with `wega://newtab` and the local website in the current
   production build. Evidence: `target/ui-ux-review/paper-newtab.window.png` and
   `target/ui-ux-review/website.window.png`.
 - Reviewed desktop navigation, custom widgets, dialogs, settings, downloads,
@@ -36,7 +36,7 @@ testing. P2 means substantial friction or inconsistency. P3 means polish.
 
 ## Findings and proposed changes
 
-### 1. P1 — Website hero is unreadable in Lotse itself
+### 1. P1 — Website hero is unreadable in Wega itself
 
 **Observed:** the headline sits on a full rectangular white/green gradient with
 very pale lettering. This is visible in `website.window.png`. The CSS relies on
@@ -48,7 +48,7 @@ only behind a tested capability/fallback path; test this exact landing-page
 selector in Servo as well as mainstream browsers. The existing interaction
 fixture's text-gradient checks did not prevent this page-specific problem.
 
-**Acceptance:** the full headline is readable in Lotse, Chromium, Firefox and
+**Acceptance:** the full headline is readable in Wega, Chromium, Firefox and
 Safari; no gradient rectangle covers the heading in the fallback rendering.
 
 ### 2. P1 — File upload has no normal file-selection experience
@@ -117,7 +117,7 @@ bookmarks and page controls; keyboard focus is visible on every custom control.
 
 ### 6. P2 — Internal pages ignore the chosen theme
 
-**Observed:** Paper chrome surrounds a dark-green `lotse://newtab` page. Internal
+**Observed:** Paper chrome surrounds a dark-green `wega://newtab` page. Internal
 documents hardcode emerald colors, so browser-owned history, bookmarks and settings
 documents have the same mismatch. This is browser-owned content, not a request
 to recolor arbitrary websites. [Source](../src/capabilities.rs#L101).
@@ -183,7 +183,7 @@ behavior distinct from opening a file on the server.
 ### 11. P2 — Browser settings mix everyday tasks and engine diagnostics
 
 Host rules, offline mode, page scripts, browsing data, media controls and WebRender
-debugging share one long settings window. Internal `lotse://settings` only tells
+debugging share one long settings window. Internal `wega://settings` only tells
 the user to open another menu. [Settings](../src/capabilities_ui.rs#L205),
 [internal page](../src/capabilities_ui.rs#L39).
 

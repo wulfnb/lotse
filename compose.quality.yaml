@@ -1,7 +1,8 @@
-# Dedicated test environment. Never mounts the normal Lotse profile/downloads.
+# Dedicated test environment. Never mounts the normal Wega profile/downloads.
+# Uses the same hardening as compose.yaml so CI exercises it.
 services:
-  servo-browser:
-    image: lotse-quality:local
+  wega:
+    image: wega-quality:local
     build:
       context: .
       args:
@@ -10,7 +11,23 @@ services:
         RUST_IMAGE: rust:1.98.0-slim-trixie
     environment:
       BROWSER_USER: quality
-      BROWSER_PASSWORD: ${LOTSE_TEST_PASSWORD:?Set a disposable test password}
+      BROWSER_PASSWORD: ${WEGA_TEST_PASSWORD:?Set a disposable test password}
+    read_only: true
     tmpfs:
       - /config:uid=1000,gid=1000,mode=0700
+      - /tmp:size=512m,mode=1777
+      - /run:size=16m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - FSETID
+      - SETUID
+      - SETGID
+      - KILL
+    pids_limit: 1024
     shm_size: 512mb

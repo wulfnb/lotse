@@ -64,6 +64,11 @@ impl Monitor {
         true
     }
 
+    /// When `refresh` will next take a sample.
+    pub fn next_sample(&self) -> Instant {
+        self.sampled_at + INTERVAL
+    }
+
     pub fn label(&self) -> String {
         let cpu = self
             .cpu_percent

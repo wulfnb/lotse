@@ -23,7 +23,23 @@ impl Browser {
                 )
             })
             .collect::<String>();
-        docs.insert("newtab".into(), document("Welcome to Lotse", &format!("<p>Search here or press <b>Cmd/Ctrl+L</b> to enter an address.</p><form action='https://www.google.com/search' method='get'><label for='search'>Search the web</label><p class='search-controls'><input id='search' name='q' type='search' placeholder='Search Google' required><button type='submit'>Search</button></p></form><h2>Saved pages</h2><ul>{shortcuts}</ul><p><a href='lotse://history'>Browse recent pages</a></p>")));
+        let policy = &self.profile().policy;
+        let (action, field, fixed) = policy.search_form();
+        let engine = match policy.search_engine {
+            wega::model::SearchEngine::Custom => "the web".to_owned(),
+            engine => engine.name().to_owned(),
+        };
+        let hidden = fixed
+            .iter()
+            .map(|(name, value)| {
+                format!(
+                    "<input type='hidden' name='{}' value='{}'>",
+                    capabilities::html(name),
+                    capabilities::html(value)
+                )
+            })
+            .collect::<String>();
+        docs.insert("newtab".into(), document("Welcome to Wega", &format!("<p>Search here or press <b>Cmd/Ctrl+L</b> to enter an address.</p><form action='{}' method='get'><label for='search'>Search the web</label><p class='search-controls'>{hidden}<input id='search' name='{}' type='search' placeholder='Search {}' required><button type='submit'>Search</button></p></form><h2>Saved pages</h2><ul>{shortcuts}</ul><p><a href='wega://history'>Browse recent pages</a></p>", capabilities::html(&action), capabilities::html(&field), capabilities::html(&engine))));
         for (name, title, items) in [
             ("history", "History", &self.profile().history),
             ("bookmarks", "Bookmarks", &self.profile().bookmarks),
@@ -56,8 +72,7 @@ impl Browser {
                 .as_nanos()
         ));
         let events = self.delegate.clone();
-        self.tab()
-            .view
+        self.view()
             .take_screenshot(None, move |result| match result {
                 Ok(image) => match image.save(&path) {
                     Ok(()) => events.notice(
@@ -82,7 +97,7 @@ impl Browser {
         );
     }
     pub fn reload_without_cache(&mut self) {
-        if let Some(url) = self.tab().view.url() {
+        if let Some(url) = self.view().url() {
             let mut headers = http::HeaderMap::new();
             headers.insert(
                 http::header::CACHE_CONTROL,
@@ -92,8 +107,7 @@ impl Browser {
                 http::header::PRAGMA,
                 http::HeaderValue::from_static("no-cache"),
             );
-            self.tab()
-                .view
+            self.view()
                 .load_request(servo::UrlRequest::new(url).headers(headers));
         }
     }
@@ -107,8 +121,7 @@ impl Browser {
             .collect();
         self.features.sites.sort_by(|a, b| a.0.cmp(&b.0));
         self.features.cookies = self
-            .tab()
-            .view
+            .view()
             .url()
             .map(|url| {
                 self.servo
@@ -131,14 +144,14 @@ impl Browser {
             .unwrap_or_default();
     }
     pub fn feature_ui(&mut self, ctx: &egui::Context) {
-        if !self.features.prompts.is_empty() {
+        if !self.dialogs.prompts.is_empty() {
             let fresh = self.prepare_dialog(ctx, "engine-confirmation");
             let mut answer = if crate::ux::escape(ctx) {
                 Some(false)
             } else {
                 None
             };
-            let prompt = self.features.prompts.front().unwrap();
+            let prompt = self.dialogs.prompts.front().unwrap();
             egui::Modal::new(egui::Id::unique("engine-confirmation")).show(ctx, |ui| {
                 ui.set_max_width(480.0);
                 ui.heading(&prompt.title);
@@ -157,7 +170,7 @@ impl Browser {
                 });
             });
             if let Some(allow) = answer {
-                let prompt = self.features.prompts.pop_front().unwrap();
+                let prompt = self.dialogs.prompts.pop_front().unwrap();
                 self.finish_dialog(ctx);
                 match prompt.decision {
                     Decision::Servo(request) => {
@@ -266,8 +279,8 @@ impl Browser {
                             }
                             ui.weak("Auto follows your system appearance. Website colors are controlled by each website.");
                             ui.horizontal(|ui|{
-                                if ui.button("Tabs on top").clicked(){self.apply(servo_browser::application::Command::Layout(crate::profile::TabLayout::Top));}
-                                if ui.button("Tabs in sidebar").clicked(){self.apply(servo_browser::application::Command::Layout(crate::profile::TabLayout::Side));}
+                                if ui.button("Tabs on top").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Top));}
+                                if ui.button("Tabs in sidebar").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Side));}
                             });
                         }
                         1 => {
@@ -280,7 +293,28 @@ impl Browser {
                     changed|=ui.add(egui::TextEdit::multiline(&mut policy.allowed_hosts).desired_rows(2).desired_width(f32::INFINITY)).changed();
                     changed|=ui.checkbox(&mut policy.offline,"Offline mode — block HTTP/HTTPS requests").changed();
                     changed|=ui.checkbox(&mut policy.allow_window_changes,"Allow sites to move and resize this window").changed();
-                    if changed { self.apply(servo_browser::application::Command::Policy(policy)); }
+                    ui.separator();
+                    ui.heading("Search");
+                    egui::ComboBox::from_label("Search engine").selected_text(policy.search_engine.name()).show_ui(ui,|ui|{
+                        for engine in wega::model::SearchEngine::ALL {
+                            changed|=ui.selectable_value(&mut policy.search_engine,engine,engine.name()).changed();
+                        }
+                    });
+                    if policy.search_engine==wega::model::SearchEngine::Custom {
+                        ui.label("Search URL, with %s where the search terms go");
+                        changed|=ui.add(egui::TextEdit::singleline(&mut policy.search_template).hint_text("https://search.example/?q=%s").desired_width(f32::INFINITY)).changed();
+                        if !wega::model::valid_search_template(&policy.search_template) {
+                            ui.colored_label(crate::theme::palette(ui.ctx()).amber,"Enter an http(s) URL containing %s once. Until then, Google is used.");
+                        }
+                    }
+                    ui.separator();
+                    ui.heading("Memory");
+                    ui.horizontal_wrapped(|ui|{
+                        ui.label("Unload background tabs after");
+                        changed|=ui.add(egui::DragValue::new(&mut policy.discard_after_minutes).range(0..=wega::lifecycle::MAX_DISCARD_MINUTES).suffix(" min")).changed();
+                    });
+                    ui.weak("Unloaded tabs keep their place, title and icon, and reload when selected. Tabs playing media, waiting for a dialog or used by developer tools stay loaded. 0 keeps every tab loaded.");
+                    if changed { self.apply(wega::application::Command::Policy(policy)); }
 
                         }
                         2 => {
@@ -300,7 +334,7 @@ impl Browser {
                     ui.separator(); ui.heading("User script");
                     ui.label("Runs in every subsequently loaded page. Changes apply after reload.");
                     ui.add(egui::TextEdit::multiline(&mut self.features.script_source).code_editor().desired_rows(7).desired_width(f32::INFINITY));
-                    if ui.button("Apply script").clicked(){let mut policy=self.profile().policy.clone();policy.user_script=self.features.script_source.clone();self.apply(servo_browser::application::Command::Policy(policy));
+                    if ui.button("Apply script").clicked(){let mut policy=self.profile().policy.clone();policy.user_script=self.features.script_source.clone();self.apply(wega::application::Command::Policy(policy));
                         if let Some(script)=self.features.script.take(){self.content_manager.remove_script(script);}
                         if !self.profile().policy.user_script.trim().is_empty(){let script=std::rc::Rc::new(servo::UserScript::new(self.profile().policy.user_script.clone(),None));self.content_manager.add_script(script.clone());self.features.script=Some(script);}
                         self.changed();self.notify(crate::ux::Severity::Success,"User script saved. Reload a page to apply.",None);
@@ -334,12 +368,12 @@ impl Browser {
                             ),
                         ] {
                             if ui.button(name).clicked() {
-                                self.tab().view.toggle_webrender_debugging(option);
+                                self.view().toggle_webrender_debugging(option);
                             }
                         }
                     });
                     if ui.button("Capture WebRender state").clicked() {
-                        self.tab().view.capture_webrender();
+                        self.view().capture_webrender();
                         self.notify(
                             crate::ux::Severity::Info,
                             "WebRender capture requested; see engine log for output location.",
@@ -347,7 +381,7 @@ impl Browser {
                         );
                     }
                     if ui.button("Clear this tab’s back/forward history").clicked() {
-                        self.tab().view.clear_session_history();
+                        self.view().clear_session_history();
                     }
                 });
             self.features.diagnostics = open;
@@ -430,7 +464,7 @@ impl Browser {
 if button.clicked() || cancel {self.features.clear_data=false;}
                 if ui.button("Clear data").clicked(){
                     let sites=self.servo.site_data_manager().site_data(servo::StorageType::all());let names:Vec<_>=sites.iter().map(|s|s.name()).collect();let names:Vec<_>=names.iter().map(String::as_str).collect();
-                    self.servo.site_data_manager().clear_site_data(&names,servo::StorageType::all());self.servo.site_data_manager().clear_cookies(None);self.servo.network_manager().clear_cache();self.apply(servo_browser::application::Command::ClearHistory);self.features.cookies.clear();self.features.sites.clear();self.features.clear_data=false;self.changed();self.notify(crate::ux::Severity::Success,"Browsing data cleared.",None);
+                    self.servo.site_data_manager().clear_site_data(&names,servo::StorageType::all());self.servo.site_data_manager().clear_cookies(None);self.servo.network_manager().clear_cache();self.apply(wega::application::Command::ClearHistory);self.features.cookies.clear();self.features.sites.clear();self.features.clear_data=false;self.changed();self.notify(crate::ux::Severity::Success,"Browsing data cleared.",None);
                 }});
             });
         }
@@ -452,7 +486,7 @@ if button.clicked() || cancel {self.features.clear_data=false;}
                                     .replace("BACKWARDS", if backward { "true" } else { "false" })
                                     .replace("QUERY", &text);
                                 let delegate = self.delegate.clone();
-                                self.tab().view.evaluate_javascript(source, move |result| {
+                                self.view().evaluate_javascript(source, move |result| {
                                     if let Ok(servo::JSValue::String(text)) = result {
                                         delegate.notice(crate::ux::Severity::Info, text, None);
                                     }

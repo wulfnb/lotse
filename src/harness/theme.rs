@@ -32,7 +32,7 @@ impl Test {
 }
 impl Browser {
     pub fn check_theme_test(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let Some(test) = &self.theme_test else {
+        let Some(test) = &self.harness.theme_test else {
             return;
         };
         assert!(
@@ -41,22 +41,21 @@ impl Browser {
             test.index
         );
         if !test.started {
-            if self.tab().view.load_status() != servo::LoadStatus::Complete {
+            if self.view().load_status() != servo::LoadStatus::Complete {
                 return;
             }
             // Load completion precedes Servo's first painted frame; switching at once
             // exported an unpainted page for the first theme.
             let Some(loaded) = test.loaded else {
-                self.theme_test.as_mut().unwrap().loaded = Some(Instant::now());
+                self.harness.theme_test.as_mut().unwrap().loaded = Some(Instant::now());
                 return;
             };
             if loaded.elapsed() < Duration::from_millis(1500) {
                 return;
             }
-            self.tab()
-                .view
+            self.view()
                 .evaluate_javascript("window.__themeSentinel=123", |_| {});
-            self.theme_test.as_mut().unwrap().started = true;
+            self.harness.theme_test.as_mut().unwrap().started = true;
             self.select_test_theme();
             return;
         }
@@ -65,13 +64,18 @@ impl Browser {
             && test.since.elapsed() > Duration::from_millis(650)
         {
             let index = test.index + 1;
-            self.theme_test.as_mut().unwrap().index = index;
+            self.harness.theme_test.as_mut().unwrap().index = index;
             if index < Theme::ALL.len() {
                 self.select_test_theme();
             } else {
-                let result = self.theme_test.as_ref().unwrap().final_result.clone();
-                self.tab()
-                    .view
+                let result = self
+                    .harness
+                    .theme_test
+                    .as_ref()
+                    .unwrap()
+                    .final_result
+                    .clone();
+                self.view()
                     .evaluate_javascript("window.__themeSentinel", move |value| {
                         *result.borrow_mut() =
                             Some(matches!(value, Ok(servo::JSValue::Number(123.0))))
@@ -90,7 +94,7 @@ impl Browser {
         }
     }
     fn select_test_theme(&mut self) {
-        let index = self.theme_test.as_ref().unwrap().index;
+        let index = self.harness.theme_test.as_ref().unwrap().index;
         let theme = Theme::ALL[index];
         let ctx = self.gui.as_ref().unwrap().egui_ctx.clone();
         self.set_theme(&ctx, theme);
@@ -108,7 +112,7 @@ impl Browser {
                 theme.glass()
             );
         }
-        let test = self.theme_test.as_mut().unwrap();
+        let test = self.harness.theme_test.as_mut().unwrap();
         test.output = Some(self.profile_dir.join(format!("theme-{theme:?}.png")));
         test.frame_checked = false;
         test.since = Instant::now();

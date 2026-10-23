@@ -146,7 +146,7 @@ fn favicon_commands_bound_memory_and_reject_bad_pixels() {
         assert_eq!(
             app.apply(Command::Favicon {
                 url: "bad".into(),
-                image: SavedFavicon {
+                image: SavedFavicon::Rgba {
                     width,
                     height,
                     rgba
@@ -158,7 +158,7 @@ fn favicon_commands_bound_memory_and_reject_bad_pixels() {
     for index in 0..129 {
         app.apply(Command::Favicon {
             url: format!("{index:03}"),
-            image: SavedFavicon {
+            image: SavedFavicon::Rgba {
                 width: 1,
                 height: 1,
                 rgba: vec![0; 4],
@@ -169,14 +169,28 @@ fn favicon_commands_bound_memory_and_reject_bad_pixels() {
     assert!(!app.profile().favicons.contains_key("000"));
     app.apply(Command::Favicon {
         url: "128".into(),
-        image: SavedFavicon {
+        image: SavedFavicon::Rgba {
             width: 1,
             height: 1,
             rgba: vec![255; 4],
         },
     });
     assert_eq!(app.profile().favicons.len(), 128);
-    assert_eq!(app.profile().favicons["128"].rgba, vec![255; 4]);
+    assert_eq!(
+        app.profile().favicons["128"],
+        SavedFavicon::Rgba {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4]
+        }
+    );
+    assert_eq!(
+        app.apply(Command::Favicon {
+            url: "png".into(),
+            image: SavedFavicon::Png(b"not a png".to_vec()),
+        }),
+        Event::Unchanged
+    );
 }
 
 #[test]

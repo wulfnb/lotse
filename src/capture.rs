@@ -33,8 +33,8 @@ impl Capture {
 
 impl crate::browser::Browser {
     pub fn check_capture(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        let complete = self.tab().view.load_status() == servo::LoadStatus::Complete;
-        let view = self.tab().view.clone();
+        let complete = self.view().load_status() == servo::LoadStatus::Complete;
+        let view = self.view().clone();
         let Some(capture) = &mut self.capture else {
             return;
         };
@@ -66,9 +66,9 @@ impl crate::browser::Browser {
         if let Some(parent) = output.parent() {
             std::fs::create_dir_all(parent).expect("Capture directory");
         }
-        let surface = &self.tab().surface;
+        let surface = &self.live().surface;
         surface.make_current().expect("Capture GPU context");
-        self.tab().view.paint();
+        self.view().paint();
         let size = surface.size();
         let rect = servo::DeviceIntRect::from_size(servo::DeviceIntSize::new(
             size.width as i32,

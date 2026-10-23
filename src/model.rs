@@ -27,7 +27,7 @@ impl Theme {
             Self::GlassDark => "Glass Dark",
             Self::Midnight => "Midnight",
             Self::Paper => "Paper",
-            Self::Emerald => "Lotse · Emerald Glass",
+            Self::Emerald => "Wega · Emerald Glass",
         }
     }
     pub fn glass(self) -> bool {
@@ -57,7 +57,59 @@ impl Dock {
         (Self::Window, "Separate window"),
     ];
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+/// Search provider used for address-bar queries and the new-tab search form.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SearchEngine {
+    #[default]
+    Google,
+    DuckDuckGo,
+    Bing,
+    Startpage,
+    Brave,
+    /// Uses `Policy::search_template`, an http(s) URL containing `%s`.
+    Custom,
+}
+impl SearchEngine {
+    pub const ALL: [Self; 6] = [
+        Self::Google,
+        Self::DuckDuckGo,
+        Self::Bing,
+        Self::Startpage,
+        Self::Brave,
+        Self::Custom,
+    ];
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Google => "Google",
+            Self::DuckDuckGo => "DuckDuckGo",
+            Self::Bing => "Bing",
+            Self::Startpage => "Startpage",
+            Self::Brave => "Brave Search",
+            Self::Custom => "Custom",
+        }
+    }
+    /// Built-in query templates; `%s` is replaced by the form-encoded query.
+    pub fn template(self) -> Option<&'static str> {
+        match self {
+            Self::Google => Some("https://www.google.com/search?q=%s"),
+            Self::DuckDuckGo => Some("https://duckduckgo.com/?q=%s"),
+            Self::Bing => Some("https://www.bing.com/search?q=%s"),
+            Self::Startpage => Some("https://www.startpage.com/do/search?query=%s"),
+            Self::Brave => Some("https://search.brave.com/search?q=%s"),
+            Self::Custom => None,
+        }
+    }
+}
+
+/// A custom template must be an absolute http(s) URL with exactly one `%s`.
+pub fn valid_search_template(template: &str) -> bool {
+    let template = template.trim();
+    template.matches("%s").count() == 1
+        && url::Url::parse(&template.replace("%s", "query"))
+            .is_ok_and(|url| matches!(url.scheme(), "http" | "https") && url.host_str().is_some())
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Policy {
     pub blocked_hosts: String,
@@ -65,8 +117,64 @@ pub struct Policy {
     pub offline: bool,
     pub allow_window_changes: bool,
     pub user_script: String,
+    pub search_engine: SearchEngine,
+    pub search_template: String,
+    /// Unload background tabs after this many idle minutes; 0 keeps them loaded.
+    pub discard_after_minutes: u32,
+}
+impl Default for Policy {
+    fn default() -> Self {
+        Self {
+            blocked_hosts: String::new(),
+            allowed_hosts: String::new(),
+            offline: false,
+            allow_window_changes: false,
+            user_script: String::new(),
+            search_engine: SearchEngine::default(),
+            search_template: String::new(),
+            discard_after_minutes: crate::lifecycle::DEFAULT_DISCARD_MINUTES,
+        }
+    }
 }
 impl Policy {
+    /// The effective template. An invalid custom template falls back to the default engine.
+    pub fn search_template(&self) -> &str {
+        match self.search_engine.template() {
+            Some(template) => template,
+            None if valid_search_template(&self.search_template) => self.search_template.trim(),
+            None => SearchEngine::default().template().unwrap_or_default(),
+        }
+    }
+    pub fn search_url(&self, query: &str) -> url::Url {
+        // `%20` instead of `+` keeps spaces correct when `%s` sits in a path segment.
+        let encoded = url::form_urlencoded::byte_serialize(query.as_bytes())
+            .collect::<String>()
+            .replace('+', "%20");
+        url::Url::parse(&self.search_template().replace("%s", &encoded))
+            .expect("validated search template")
+    }
+    /// GET form target for internal search pages: action, query field and fixed fields.
+    pub fn search_form(&self) -> (String, String, Vec<(String, String)>) {
+        const MARKER: &str = "wegasearchquerymarker";
+        let mut url = url::Url::parse(&self.search_template().replace("%s", MARKER))
+            .expect("validated search template");
+        let pairs: Vec<(String, String)> = url.query_pairs().into_owned().collect();
+        let field = pairs
+            .iter()
+            .find(|(_, value)| value == MARKER)
+            .map(|(key, _)| key.clone());
+        url.set_query(None);
+        url.set_fragment(None);
+        match field {
+            Some(field) => (
+                url.to_string(),
+                field,
+                pairs.into_iter().filter(|(_, v)| v != MARKER).collect(),
+            ),
+            // Path-based templates cannot be expressed as a form; use the default engine.
+            None => Self::default().search_form(),
+        }
+    }
     pub fn permits(&self, url: &url::Url) -> bool {
         let host = url.host_str().unwrap_or_default().trim_end_matches('.');
         let matches = |list: &str| {

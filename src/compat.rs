@@ -23,10 +23,10 @@ pub fn content_manager(servo: &servo::Servo) -> Rc<servo::UserContentManager> {
     let manager = Rc::new(servo::UserContentManager::new(servo));
     manager.add_stylesheet(Rc::new(servo::user_contents::UserStyleSheet::new(
         READABLE_GRADIENT_TEXT.into(),
-        url::Url::parse("about:servo-readability").unwrap(),
+        url::Url::parse("about:wega-readability").unwrap(),
     )));
     manager.add_script(Rc::new(servo::UserScript::new(
-        "document.addEventListener('click',e=>{const a=e.target.closest?.('a[download]');if(!a||e.defaultPrevented||e.button!==0)return;const u=new URL(a.href,location.href);if(!['http:','https:'].includes(u.protocol))return;e.preventDefault();location.href='lotse://download?url='+encodeURIComponent(u.href)+'&name='+encodeURIComponent(a.getAttribute('download')||'')},false);".into(),None,
+        "document.addEventListener('click',e=>{const a=e.target.closest?.('a[download]');if(!a||e.defaultPrevented||e.button!==0)return;const u=new URL(a.href,location.href);if(!['http:','https:'].includes(u.protocol))return;e.preventDefault();location.href='wega://download?url='+encodeURIComponent(u.href)+'&name='+encodeURIComponent(a.getAttribute('download')||'')},false);".into(),None,
     )));
     manager
 }

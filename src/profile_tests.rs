@@ -1,32 +1,27 @@
 use super::*;
 
 #[test]
-fn legacy_internal_links_keep_working_with_lotse_branding() {
+fn internal_links_use_only_the_wega_scheme() {
     assert_eq!(
-        resolve_address("servo://history").unwrap().as_str(),
-        "lotse://history"
+        resolve_address("wega://bookmarks").unwrap().as_str(),
+        "wega://bookmarks"
     );
-    assert_eq!(
-        resolve_address("lotse://bookmarks").unwrap().as_str(),
-        "lotse://bookmarks"
-    );
-    assert_eq!(
-        canonical_internal_address("https://servo.org/"),
-        "https://servo.org/"
-    );
+    for retired in ["servo://history", "lotse://settings"] {
+        assert!(
+            resolve_address(retired).is_err(),
+            "{retired} must not resolve"
+        );
+    }
     let directory =
-        std::env::temp_dir().join(format!("lotse-legacy-profile-{}", std::process::id()));
+        std::env::temp_dir().join(format!("wega-internal-profile-{}", std::process::id()));
     let original = Profile {
-        urls: vec!["https://example.com/".into(), "servo://newtab".into()],
+        urls: vec!["https://example.com/".into(), "wega://newtab".into()],
         active: 1,
         ..Profile::default()
     };
     original.save(&directory).unwrap();
     let restored = Profile::load(&directory).unwrap();
-    assert_eq!(
-        restored.urls,
-        vec!["https://example.com/", "lotse://newtab"]
-    );
+    assert_eq!(restored.urls, vec!["https://example.com/", "wega://newtab"]);
     assert_eq!(restored.active, original.active);
     assert_eq!(restored.bookmarks.len(), original.bookmarks.len());
     std::fs::remove_dir_all(directory).unwrap();
@@ -87,10 +82,7 @@ fn profile_round_trip_and_corrupt_file_detection() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!(
-        "servo-browser-test-{}-{unique}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("wega-test-{}-{unique}", std::process::id()));
     let profile = Profile {
         layout: TabLayout::Top,
         devtools_dock: crate::model::Dock::Right,
@@ -134,7 +126,7 @@ fn address_schemes_local_files_and_invalid_hosts() {
     assert_eq!(tabs, [1, 2]);
     assert_eq!(active, 1);
     let directory = Profile::default_dir();
-    assert!(directory.is_absolute() || directory == Path::new(".servo-browser"));
+    assert!(directory.is_absolute() || directory == Path::new(".wega"));
 }
 
 #[test]
@@ -174,4 +166,172 @@ fn history_grouping_handles_yesterday_older_and_invalid_timestamps() {
 fn malformed_host_ports_are_rejected_before_navigation() {
     assert!(resolve_address("localhost:bad").is_err());
     assert!(resolve_address("example.com:bad").is_err());
+}
+
+// 1×1 PNG produced by the desktop encoder.
+const PNG: &[u8] = &[
+    0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n', 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0,
+    0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1f, 0x15, 0xc4, 0x89,
+];
+
+#[test]
+fn legacy_rgba_favicons_still_load_and_png_favicons_are_stored_as_base64() {
+    let legacy: Profile = serde_json::from_str(
+        r#"{"favicons":{"https://a.test/":{"width":1,"height":1,"rgba":[1,2,3,255]}}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        legacy.favicons["https://a.test/"],
+        SavedFavicon::Rgba {
+            width: 1,
+            height: 1,
+            rgba: vec![1, 2, 3, 255]
+        }
+    );
+    let mut profile = Profile::default();
+    profile
+        .favicons
+        .insert("https://b.test/".into(), SavedFavicon::Png(PNG.to_vec()));
+    let json = serde_json::to_string(&profile).unwrap();
+    assert!(
+        json.contains(&format!(
+            r#""https://b.test/":{{"png":"{}"}}"#,
+            crate::base64_text::encode(PNG)
+        )),
+        "{json}"
+    );
+    let restored: Profile = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        restored.favicons["https://b.test/"],
+        SavedFavicon::Png(PNG.to_vec())
+    );
+    assert_eq!(
+        restored.favicons["https://b.test/"].dimensions(),
+        Some((1, 1))
+    );
+    assert!(restored.favicons["https://b.test/"].valid(32));
+}
+
+#[test]
+fn corrupt_or_oversized_png_favicons_are_dropped_without_losing_the_profile() {
+    let mut profile: Profile = serde_json::from_str(
+        r#"{"urls":["https://keep.test/"],"favicons":{"bad":{"png":"!!!"},"text":{"png":"aGVsbG8="}}}"#,
+    )
+    .unwrap();
+    let mut huge = PNG.to_vec();
+    huge[16..20].copy_from_slice(&1000u32.to_be_bytes());
+    profile
+        .favicons
+        .insert("huge".into(), SavedFavicon::Png(huge));
+    profile.normalize();
+    assert!(profile.favicons.is_empty());
+    assert_eq!(profile.urls, vec!["https://keep.test/"]);
+}
+
+#[test]
+fn saved_titles_stay_aligned_with_urls_after_normalization() {
+    let mut profile = Profile {
+        urls: vec![
+            "javascript://bad".into(),
+            "https://a.test/".into(),
+            "https://b.test/".into(),
+        ],
+        titles: vec!["Bad".into(), "A".into()],
+        ..Profile::default()
+    };
+    profile.normalize();
+    assert_eq!(profile.urls, vec!["https://a.test/", "https://b.test/"]);
+    assert_eq!(profile.titles, vec!["A", ""]);
+}
+
+#[test]
+fn searches_use_the_configured_engine_and_invalid_custom_templates_fall_back() {
+    use crate::model::{Policy, SearchEngine};
+    let policy = |engine, template: &str| Policy {
+        search_engine: engine,
+        search_template: template.into(),
+        ..Policy::default()
+    };
+    assert_eq!(Policy::default().search_engine, SearchEngine::Google);
+    assert_eq!(
+        resolve_address("rust lang").unwrap().as_str(),
+        "https://www.google.com/search?q=rust%20lang"
+    );
+    assert_eq!(
+        resolve_address_with("a&b", &policy(SearchEngine::DuckDuckGo, ""))
+            .unwrap()
+            .as_str(),
+        "https://duckduckgo.com/?q=a%26b"
+    );
+    assert_eq!(
+        resolve_address_with("x y", &policy(SearchEngine::Startpage, ""))
+            .unwrap()
+            .as_str(),
+        "https://www.startpage.com/do/search?query=x%20y"
+    );
+    let custom = policy(
+        SearchEngine::Custom,
+        "https://search.test/find?lang=en&term=%s",
+    );
+    assert_eq!(
+        resolve_address_with("日本", &custom).unwrap().as_str(),
+        "https://search.test/find?lang=en&term=%E6%97%A5%E6%9C%AC"
+    );
+    assert_eq!(
+        custom.search_form(),
+        (
+            "https://search.test/find".to_owned(),
+            "term".to_owned(),
+            vec![("lang".to_owned(), "en".to_owned())]
+        )
+    );
+    // Addresses are never sent to the search engine.
+    assert_eq!(
+        resolve_address_with("example.com", &custom)
+            .unwrap()
+            .as_str(),
+        "https://example.com/"
+    );
+    for invalid in [
+        "",
+        "https://search.test/",
+        "javascript:%s",
+        "https://a/%s/%s",
+    ] {
+        assert!(!crate::model::valid_search_template(invalid), "{invalid}");
+        assert_eq!(
+            resolve_address_with("q", &policy(SearchEngine::Custom, invalid))
+                .unwrap()
+                .host_str(),
+            Some("www.google.com")
+        );
+    }
+    let path = policy(SearchEngine::Custom, "https://search.test/q/%s");
+    assert_eq!(
+        resolve_address_with("a b", &path).unwrap().as_str(),
+        "https://search.test/q/a%20b"
+    );
+    assert_eq!(
+        path.search_form().1,
+        "q",
+        "Path templates fall back to a form engine"
+    );
+    for engine in SearchEngine::ALL {
+        let (action, field, _) = policy(engine, "").search_form();
+        assert!(
+            action.starts_with("https://") && !field.is_empty(),
+            "{engine:?}"
+        );
+    }
+}
+
+#[test]
+fn discard_timeout_defaults_to_thirty_minutes_for_old_profiles() {
+    let profile: Profile = serde_json::from_str(r#"{"policy":{"offline":true}}"#).unwrap();
+    assert!(profile.policy.offline);
+    assert_eq!(profile.policy.discard_after_minutes, 30);
+    assert_eq!(
+        profile.policy.search_engine,
+        crate::model::SearchEngine::Google
+    );
 }

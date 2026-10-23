@@ -11,8 +11,8 @@ import time
 import urllib.error
 import urllib.request
 
-binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/servo-browser').resolve())
-profile = Path(tempfile.mkdtemp(prefix='servo-webdriver-', dir=os.environ.get('LOTSE_TEST_OUTPUT')))
+binary = str(Path(sys.argv[1] if len(sys.argv) > 1 else 'target/debug/wega').resolve())
+profile = Path(tempfile.mkdtemp(prefix='wega-webdriver-', dir=os.environ.get('WEGA_TEST_OUTPUT')))
 with socket.socket() as listener:
     listener.bind(('127.0.0.1', 0))
     port = listener.getsockname()[1]
@@ -31,7 +31,7 @@ def request(method, path, body=None, expected=200):
     return result['value']
 
 with (profile / 'browser.log').open('w') as log:
-    process = subprocess.Popen([binary, '--profile-dir', str(profile), '--webdriver-port', str(port), 'servo://newtab'], stdout=log, stderr=log)
+    process = subprocess.Popen([binary, '--profile-dir', str(profile), '--webdriver-port', str(port), 'wega://newtab'], stdout=log, stderr=log)
     try:
         deadline = time.monotonic() + 20
         while True:
@@ -43,15 +43,15 @@ with (profile / 'browser.log').open('w') as log:
                     raise RuntimeError((profile / 'browser.log').read_text())
                 time.sleep(0.2)
         assert request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'firefox'}}}, 500)['error'] == 'session not created'
-        session = request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'lotse'}}})
-        assert session['capabilities']['browserName'] == 'lotse'
+        session = request('POST', '/session', {'capabilities': {'alwaysMatch': {'browserName': 'wega'}}})
+        assert session['capabilities']['browserName'] == 'wega'
         assert session['capabilities']['browserVersion'].startswith('0.1.0')
         sid = session['sessionId']
         root = f'/session/{sid}'
         assert request('POST', root + '/url', {'url': 'javascript://blocked'}, 400)['error'] == 'invalid argument'
-        request('POST', root + '/url', {'url': 'servo://newtab'})
-        assert request('GET', root + '/url') == 'lotse://newtab'
-        request('POST', root + '/url', {'url': os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767') + '/capabilities.html'})
+        request('POST', root + '/url', {'url': 'wega://newtab'})
+        assert request('GET', root + '/url') == 'wega://newtab'
+        request('POST', root + '/url', {'url': os.environ.get('WEGA_FIXTURE_URL', 'http://127.0.0.1:8767') + '/capabilities.html'})
         title = request('GET', root + '/title')
         assert title == 'Capability fixture', title
         assert request('GET', root + '/url').endswith('/capabilities.html')
@@ -66,7 +66,7 @@ with (profile / 'browser.log').open('w') as log:
         assert request('POST', root + '/execute/sync', {'script': 'throw new Error("test exception")', 'args': []}, 500)['error'] == 'javascript error'
         for script, expected in [('return undefined', None), ('return null', None), ('return true', True), ('return 42', 42), ('return "string"', 'string'), ('return [1,2]', [1,2])]:
             assert request('POST', root + '/execute/sync', {'script': script, 'args': []}) == expected
-        fixture = os.environ.get('LOTSE_FIXTURE_URL', 'http://127.0.0.1:8767')
+        fixture = os.environ.get('WEGA_FIXTURE_URL', 'http://127.0.0.1:8767')
         request('POST', root + '/url', {'url': fixture + '/second.html'})
         title = request('GET', root + '/title')
         assert title == 'Second Servo document', title

@@ -3,7 +3,7 @@ struct Temp(PathBuf);
 impl Temp {
     fn new() -> Self {
         let dir = std::env::temp_dir().join(format!(
-            "lotse-storage-{}-{}",
+            "wega-storage-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

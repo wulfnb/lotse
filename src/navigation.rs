@@ -33,6 +33,20 @@ pub fn dispatch(command: Command, port: &mut impl NavigationPort) -> Result<bool
     Ok(true)
 }
 
+/// Decision for a navigation requested by page content (links, scripts, forms).
+/// Embedder loads — address bar, bookmarks, history, command line, session restore —
+/// never ask, so local files and data documents stay reachable for the user.
+/// Like Chromium and Firefox, web content may not open local files or top-level
+/// `data:` documents; local and internal pages may still link to local files.
+pub fn content_navigation_allowed(target: &url::Url, current: Option<&url::Url>) -> bool {
+    let from = current.map(url::Url::scheme).unwrap_or_default();
+    match target.scheme() {
+        "file" => matches!(from, "file" | "wega"),
+        "data" => from == "wega",
+        _ => true,
+    }
+}
+
 /// Completion is evaluated against the engine snapshot after its event batch.
 /// An old completion or unrelated history callback cannot finish a new load.
 pub struct Completion {

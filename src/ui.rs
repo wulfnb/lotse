@@ -332,6 +332,7 @@ pub(crate) fn page_corners(painter: &egui::Painter, rect: egui::Rect) {
 enum TabAction {
     Select(usize),
     Close(usize),
+    Discard(usize),
     Move(usize, usize),
     New,
     Layout,
@@ -443,7 +444,7 @@ impl Browser {
                 });
                 let width = shown.response.rect.width();
                 if (self.profile().sidebar_width - width).abs() > 1.0 {
-                    self.apply(servo_browser::application::Command::SidebarWidth(width));
+                    self.apply(wega::application::Command::SidebarWidth(width));
                     self.changed();
                 }
             }
@@ -488,16 +489,14 @@ impl Browser {
                                         self.chrome.notice = None;
                                     }
                                 } else {
-                                    let status =
-                                        self.tab().view.status_text().unwrap_or_else(|| {
-                                            if self.tab().view.load_status()
-                                                == servo::LoadStatus::Complete
-                                            {
-                                                "Servo · WebRender".into()
-                                            } else {
-                                                "Loading page…".into()
-                                            }
-                                        });
+                                    let status = self.view().status_text().unwrap_or_else(|| {
+                                        if self.view().load_status() == servo::LoadStatus::Complete
+                                        {
+                                            "Servo · WebRender".into()
+                                        } else {
+                                            "Loading page…".into()
+                                        }
+                                    });
                                     ui.add(
                                         egui::Label::new(
                                             RichText::new(status).size(11.0).color(colors.muted),
@@ -514,7 +513,7 @@ impl Browser {
                             if ui
                                 .small_button(format!(
                                     "{}%",
-                                    (self.tab().view.page_zoom() * 100.0).round()
+                                    (self.view().page_zoom() * 100.0).round()
                                 ))
                                 .clicked()
                             {
@@ -590,7 +589,7 @@ impl Browser {
                 self.toggle_layout();
             }
             if ui
-                .add_enabled_ui(self.tab().view.can_go_back(), |ui| {
+                .add_enabled_ui(self.view().can_go_back(), |ui| {
                     icon(ui, "←", "Back (Alt+Left)")
                 })
                 .inner
@@ -599,7 +598,7 @@ impl Browser {
                 self.traverse(false);
             }
             if ui
-                .add_enabled_ui(self.tab().view.can_go_forward(), |ui| {
+                .add_enabled_ui(self.view().can_go_forward(), |ui| {
                     icon(ui, "→", "Forward (Alt+Right)")
                 })
                 .inner
@@ -612,7 +611,7 @@ impl Browser {
             if reload.clicked() {
                 self.reload();
             }
-            let url = self.tab().view.url();
+            let url = self.view().url();
             let protocol = url.as_ref().map(|u| u.scheme()).unwrap_or("");
             ui.label(
                 RichText::new(match protocol {
@@ -630,11 +629,15 @@ impl Browser {
                 _ => "Local or internal document.",
             });
             let width = (ui.available_width() - 126.0).max(100.0);
+            let hint = match self.profile().policy.search_engine {
+                wega::model::SearchEngine::Custom => "Search or enter address".to_owned(),
+                engine => format!("Search {} or enter address", engine.name()),
+            };
             let response = ui.add_sized(
                 [width, 34.0],
                 egui::TextEdit::singleline(&mut self.chrome.address)
                     .id(Id::unique("address"))
-                    .hint_text("Search Google or enter address")
+                    .hint_text(hint)
                     .frame(
                         Frame::new()
                             .fill(colors.inset)
@@ -689,7 +692,7 @@ impl Browser {
                     )
                     .clicked()
                 {
-                    self.add_tab("lotse://newtab");
+                    self.add_tab("wega://newtab");
                     self.chrome.focus_address = true;
                     ui.close();
                 }
@@ -701,12 +704,12 @@ impl Browser {
                 }
                 ui.separator();
                 if ui.button("Tabs on top").clicked() {
-                    self.apply(servo_browser::application::Command::Layout(TabLayout::Top));
+                    self.apply(wega::application::Command::Layout(TabLayout::Top));
                     self.changed();
                     ui.close();
                 }
                 if ui.button("Tabs in sidebar").clicked() {
-                    self.apply(servo_browser::application::Command::Layout(TabLayout::Side));
+                    self.apply(wega::application::Command::Layout(TabLayout::Side));
                     self.changed();
                     ui.close();
                 }
@@ -753,8 +756,8 @@ impl Browser {
                 if ui.button("Browser settings").clicked() {self.features.settings=true;ui.close();}
                 if ui.button("Site information").clicked() {self.refresh_site_data();self.features.site_info=true;ui.close();}
                 if ui.button("Save page as image").clicked() {self.screenshot_page();ui.close();}
-                if ui.button("Reader view").clicked() {self.tab().view.evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
-                if ui.button("Toggle page dark style").clicked() {self.tab().view.evaluate_javascript("(()=>{let s=document.getElementById('__servo_dark');if(s){s.remove();return} s=document.createElement('style');s.id='__servo_dark';s.textContent='html{color-scheme:dark!important;background:#171717!important;color:#eee!important}body,main,article,section,header,footer,nav{background-color:#171717!important;color:#eee!important}a{color:#a9caff!important}';document.head.appendChild(s)})()", |_|{});ui.close();}
+                if ui.button("Reader view").clicked() {self.view().evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
+                if ui.button("Toggle page dark style").clicked() {self.view().evaluate_javascript("(()=>{let s=document.getElementById('__wega_dark');if(s){s.remove();return} s=document.createElement('style');s.id='__wega_dark';s.textContent='html{color-scheme:dark!important;background:#171717!important;color:#eee!important}body,main,article,section,header,footer,nav{background-color:#171717!important;color:#eee!important}a{color:#a9caff!important}';document.head.appendChild(s)})()", |_|{});ui.close();}
                 if ui.button("Find in page").clicked() {self.features.find_open=true;ui.close();}
                 if ui.button("Reload without cache").clicked() {self.reload_without_cache();ui.close();}
                 if ui.button("Home").clicked() {
@@ -763,7 +766,7 @@ impl Browser {
                 }
                 ui.separator();
                 ui.label(
-                    RichText::new("Lotse · Rust + Servo 0.7.0 + egui")
+                    RichText::new("Wega · Rust + Servo 0.7.0 + egui")
                         .small()
                         .color(colors.muted),
                 );
@@ -779,10 +782,13 @@ impl Browser {
         for index in 0..self.session().tabs().len() {
             let selected = self.session().active() == index;
             let title = self.session().tabs()[index].title();
-            let id = self.session().tabs()[index].view.id();
-            let loading = self.session().tabs()[index].view.load_status()
-                != servo::LoadStatus::Complete
-                || self.features.traversals.contains_key(&id);
+            let tab = &self.session().tabs()[index];
+            let id = tab.key;
+            let unloaded = !tab.loaded();
+            let loading = tab.loading()
+                || tab
+                    .id()
+                    .is_some_and(|view| self.features.traversals.contains_key(&view));
             let width = if vertical {
                 ui.available_width().max(130.0)
             } else {
@@ -818,7 +824,11 @@ impl Browser {
                     texture.id(),
                     icon_rect,
                     egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
+                    if unloaded {
+                        egui::Color32::WHITE.gamma_multiply(0.55)
+                    } else {
+                        egui::Color32::WHITE
+                    },
                 );
             }
             if !self
@@ -839,7 +849,13 @@ impl Browser {
             let mut job = egui::text::LayoutJob::simple_singleline(
                 label,
                 egui::FontId::proportional(14.0),
-                if selected { colors.text } else { colors.muted },
+                if selected {
+                    colors.text
+                } else if unloaded {
+                    colors.muted.gamma_multiply(0.7)
+                } else {
+                    colors.muted
+                },
             );
             job.wrap.max_width = title_rect.width();
             job.wrap.max_rows = 1;
@@ -887,9 +903,14 @@ impl Browser {
             );
             let closing = close.on_hover_text("Close tab").clicked();
             let response = response.on_hover_text(format!(
-                "{}\n{}\nDrag to reorder · Right-click for tab options",
+                "{}\n{}\n{}Drag to reorder · Right-click for tab options",
                 title,
-                self.session().tabs()[index].url()
+                self.session().tabs()[index].url(),
+                if unloaded {
+                    "Unloaded to save memory; select to reload.\n"
+                } else {
+                    ""
+                }
             ));
             if response.clicked() && !closing {
                 action = Some(TabAction::Select(index));
@@ -903,6 +924,14 @@ impl Browser {
             response.context_menu(|ui| {
                 if ui.button("Close tab").clicked() {
                     action = Some(TabAction::Close(index));
+                    ui.close();
+                }
+                if ui
+                    .add_enabled(!selected && !unloaded, egui::Button::new("Unload tab"))
+                    .on_hover_text("Free this tab's memory. It reloads when you select it.")
+                    .clicked()
+                {
+                    action = Some(TabAction::Discard(index));
                     ui.close();
                 }
                 if ui
@@ -928,17 +957,13 @@ impl Browser {
                 }
             });
             self.chrome.tab_rects.push((id, rect));
-            if let Some(payload) = response.dnd_release_payload::<servo::WebViewId>()
-                && let Some(from) = self
-                    .session()
-                    .tabs()
-                    .iter()
-                    .position(|t| t.view.id() == *payload)
+            if let Some(payload) = response.dnd_release_payload::<u64>()
+                && let Some(from) = self.session().tabs().iter().position(|t| t.key == *payload)
             {
                 action = Some(TabAction::Move(from, index));
             }
             if response.contains_pointer()
-                && egui::DragAndDrop::has_payload_of_type::<servo::WebViewId>(ui.ctx())
+                && egui::DragAndDrop::has_payload_of_type::<u64>(ui.ctx())
             {
                 ui.painter().rect_stroke(
                     rect,
@@ -982,8 +1007,11 @@ impl Browser {
             match action {
                 TabAction::Select(i) => self.select_tab(i),
                 TabAction::Close(i) => self.close_tab(i),
+                TabAction::Discard(i) => {
+                    self.discard_tab(i);
+                }
                 TabAction::New => {
-                    self.add_tab("lotse://newtab");
+                    self.add_tab("wega://newtab");
                     self.chrome.focus_address = true;
                 }
                 TabAction::Layout => self.toggle_layout(),
@@ -1268,7 +1296,7 @@ impl Browser {
                 .shrink(8.0)
         };
         if let Some(index) = remove {
-            self.apply(servo_browser::application::Command::RemoveBookmark(index));
+            self.apply(wega::application::Command::RemoveBookmark(index));
             self.changed();
         }
         if let Some(url) = open_url {
@@ -1296,7 +1324,7 @@ impl Browser {
                         .button(RichText::new("Clear history").color(colors.danger))
                         .clicked()
                     {
-                        self.apply(servo_browser::application::Command::ClearHistory);
+                        self.apply(wega::application::Command::ClearHistory);
                         self.chrome.confirm_clear_history = false;
                         self.changed();
                     }
@@ -1307,7 +1335,7 @@ impl Browser {
 
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.feature_ui(ctx);
-        if !self.features.prompts.is_empty() || self.features.clear_data {
+        if !self.dialogs.prompts.is_empty() || self.features.clear_data {
             return;
         }
         // Requests are answered once by consuming the corresponding Servo responder.
@@ -1344,7 +1372,7 @@ impl Browser {
             }
             return;
         }
-        if !self.authentications.is_empty() {
+        if !self.dialogs.authentications.is_empty() {
             let fresh = self.prepare_dialog(ctx, "authentication");
             let submit = crate::ux::enter(ctx);
             let mut answer = if crate::ux::escape(ctx) {
@@ -1352,7 +1380,7 @@ impl Browser {
             } else {
                 None
             };
-            let request = self.authentications.front().unwrap();
+            let request = self.dialogs.authentications.front().unwrap();
             egui::Modal::new(Id::unique("authentication")).show(ctx, |ui| {
                 ui.heading("Website authentication");
                 ui.label(request.url().origin().ascii_serialization());
@@ -1377,7 +1405,7 @@ impl Browser {
                 });
             });
             if let Some(allow) = answer {
-                let request = self.authentications.pop_front().unwrap();
+                let request = self.dialogs.authentications.pop_front().unwrap();
                 if allow {
                     request.authenticate(
                         std::mem::take(&mut self.chrome.username),
@@ -1390,7 +1418,7 @@ impl Browser {
             }
             return;
         }
-        let Some((owner, mut control)) = self.controls.pop_front() else {
+        let Some((owner, mut control)) = self.dialogs.controls.pop_front() else {
             return;
         };
         let fresh = self.prepare_dialog(ctx, format!("control-{:?}", control.id()));
@@ -1401,7 +1429,7 @@ impl Browser {
             .session()
             .tabs()
             .iter()
-            .find(|t| t.view.id() == owner)
+            .find(|t| t.id() == Some(owner))
             .map(|t| t.url())
             .unwrap_or_default();
         match &mut control {
@@ -1668,6 +1696,6 @@ impl Browser {
             }
             servo::EmbedderControl::InputMethod(_) => return,
         }
-        self.controls.push_front((owner, control));
+        self.dialogs.controls.push_front((owner, control));
     }
 }

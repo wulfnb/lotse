@@ -10,15 +10,16 @@ import time
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location('lotse_auth', Path(__file__).resolve().parents[1] / 'docker/auth-service.py')
+SPEC = importlib.util.spec_from_file_location('wega_auth', Path(__file__).resolve().parents[1] / 'docker/auth-service.py')
 auth = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(auth)
 RESTART_WEBSOCKET = auth.restart_websocket
+DEFAULT_DIRECTORY, DEFAULT_UPLOADS = auth.DIRECTORY, auth.UPLOADS
 
 
 class AuthHelpers:
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix='lotse-auth-unit-')
+        self.temporary = tempfile.TemporaryDirectory(prefix='wega-auth-unit-')
         self.addCleanup(self.temporary.cleanup)
         self.environment = patch.dict(os.environ, {'BROWSER_USER': 'alice', 'BROWSER_PASSWORD': 'a-unique-test-password'}, clear=True)
         self.environment.start()
@@ -26,6 +27,9 @@ class AuthHelpers:
         self.directory = patch.object(auth, 'DIRECTORY', Path(self.temporary.name))
         self.directory.start()
         self.addCleanup(self.directory.stop)
+        self.uploads = patch.object(auth, 'UPLOADS', Path(self.temporary.name) / 'uploads')
+        self.uploads.start()
+        self.addCleanup(self.uploads.stop)
         self.websocket = patch.object(auth, 'restart_websocket')
         self.restart = self.websocket.start()
         self.addCleanup(self.websocket.stop)
@@ -186,6 +190,14 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
                     auth.watch_websocket()
             self.assertEqual(self.restart.called, expired or exited)
             self.assertEqual(token in auth.SESSIONS, not expired)
+        # Upload retention runs hourly from the same watchdog thread.
+        clock = iter([0, 3600, 3600] + [3601] * 10)
+        process = Mock()
+        process.poll.return_value = None
+        with patch.object(auth, 'WEBSOCKET', process), patch.object(auth, 'prune_uploads') as prune, patch.object(auth.time, 'monotonic', lambda: next(clock)), patch.object(auth.time, 'sleep', side_effect=[None, StopIteration]):
+            with self.assertRaises(StopIteration):
+                auth.watch_websocket()
+        prune.assert_called_once()
 
     def test_bridge_shutdown_handles_timeout_and_process_exit_races(self):
         from unittest.mock import Mock
@@ -205,7 +217,7 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
             auth.stop_websocket()
             kill.assert_not_called()
 
-    def test_restart_launches_only_loopback_bridge_in_its_own_process_group(self):
+    def test_restart_launches_only_unix_socket_bridge_in_its_own_process_group(self):
         from unittest.mock import Mock
         process = Mock()
         with patch.object(auth.subprocess, 'Popen', return_value=process) as spawn, patch.object(auth, 'WEBSOCKET', None), patch.object(auth, 'stop_websocket') as stop:
@@ -213,11 +225,21 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
             self.assertEqual(auth.WEBSOCKET, process)
             stop.assert_called_once()
             self.assertTrue(spawn.call_args.kwargs['start_new_session'])
-            self.assertIn('127.0.0.1:6080', spawn.call_args.args[0])
+            arguments = spawn.call_args.args[0]
+            # Pages in the container can reach loopback TCP; they must never
+            # reach the unauthenticated bridge or the VNC server.
+            self.assertIn('--unix-listen=' + auth.WEBSOCKET_SOCKET, arguments)
+            self.assertIn('--unix-target=' + auth.VNC_SOCKET, arguments)
+            self.assertIn('--unix-listen-mode=660', arguments)
+            self.assertFalse([value for value in arguments[1:] if not value.startswith('--')], arguments)
 
     def test_attempt_table_saturation_cookie_reply_and_silent_logging(self):
         auth.ATTEMPTS.update({str(index): (time.monotonic(), 1) for index in range(4097)})
-        self.assertEqual(self.request('/auth/login', {})[0], 429)
+        # A full table evicts the oldest windows instead of refusing everyone.
+        self.assertEqual(self.request('/auth/login', {})[0], 401)
+        self.assertEqual(len(auth.ATTEMPTS), auth.ATTEMPT_TABLE)
+        self.assertNotIn('0', auth.ATTEMPTS)
+        self.assertEqual(auth.ATTEMPTS['test-client'][1], 1)
         handler = object.__new__(auth.Handler)
         handler.send_response = lambda *_: None
         handler.send_header = lambda *_: None
@@ -253,16 +275,20 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
 
     def test_server_entrypoint_always_stops_bridge(self):
         import runpy
+        import socketserver
         from unittest.mock import Mock
-        server = Mock()
-        # Use SystemExit to leave the real entrypoint's blocking server loop.
-        server.serve_forever.side_effect = SystemExit(0)
         process = Mock(pid=123456)
-        import http.server
-        with patch.dict(os.environ, {'BROWSER_AUTH_DIR': str(auth.DIRECTORY)}), patch.object(auth.sys, 'argv', [SPEC.origin]), patch.object(http.server, 'ThreadingHTTPServer', return_value=server), patch.object(auth.threading, 'Thread') as thread, patch.object(auth.signal, 'signal') as signal_handler, patch.object(auth.subprocess, 'Popen', return_value=process), patch.object(auth.os, 'killpg') as kill:
+        path = auth.DIRECTORY / 'gateway.sock'
+        seen = []
+        def serve(server):
+            seen.append(path.stat().st_mode & 0o777)
+            # Use SystemExit to leave the real entrypoint's blocking server loop.
+            raise SystemExit(0)
+        with patch.dict(os.environ, {'BROWSER_AUTH_DIR': str(auth.DIRECTORY), 'BROWSER_AUTH_SOCKET': str(path), 'BROWSER_UPLOAD_DIR': str(auth.UPLOADS)}), patch.object(auth.sys, 'argv', [SPEC.origin]), patch.object(socketserver.BaseServer, 'serve_forever', serve), patch.object(auth.threading, 'Thread') as thread, patch.object(auth.signal, 'signal') as signal_handler, patch.object(auth.subprocess, 'Popen', return_value=process), patch.object(auth.os, 'killpg') as kill:
             with self.assertRaises(SystemExit):
                 runpy.run_path(SPEC.origin, run_name='__main__')
-            server.serve_forever.assert_called_once()
+            self.assertEqual(seen, [0o660])
+            self.assertFalse(path.exists(), 'Gateway socket must be removed on exit')
             kill.assert_called()
             thread.return_value.start.assert_called_once()
             with self.assertRaises(SystemExit):
@@ -300,10 +326,6 @@ class SecurityRegressionTests(AuthHelpers, unittest.TestCase):
         self.assertTrue(auth.matches(auth.account(), 'alice', 'a-unique-test-password'))
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class UploadTests(AuthHelpers, unittest.TestCase):
     def test_upload_requires_session_csrf_origin_and_bounded_binary_body(self):
         token = self.login()
@@ -326,9 +348,11 @@ class UploadTests(AuthHelpers, unittest.TestCase):
         status, result, _ = upload(raw=b'\x00binary\xff')
         self.assertEqual(status, 201)
         path = Path(result['path'])
-        self.assertTrue(path.is_relative_to(auth.DIRECTORY / 'uploads'))
+        self.assertTrue(path.is_relative_to(auth.UPLOADS))
         self.assertEqual(path.read_bytes(), b'\x00binary\xff')
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # Group-readable for the browser UID; never world-readable.
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o750)
         self.assertEqual(upload(raw=b'')[0], 201)
 
     def test_upload_names_collisions_quota_and_failed_publication_are_safe(self):
@@ -338,13 +362,200 @@ class UploadTests(AuthHelpers, unittest.TestCase):
         first = auth.save_upload('notes.txt', b'first')
         second = auth.save_upload('notes.txt', b'second')
         self.assertNotEqual(first, second)
+        with patch.object(auth.secrets, 'token_hex', side_effect=[first.parent.name[5:], 'unique']):
+            self.assertEqual(auth.save_upload('retry.txt', b'retry').parent.name, 'file-unique')
         self.assertEqual(first.read_bytes(), b'first')
         with patch.object(auth, 'UPLOAD_LIMIT', 1), self.assertRaises(ValueError):
             auth.save_upload('big', b'xx')
         with patch.object(auth, 'UPLOAD_QUOTA', 2), self.assertRaises(ValueError):
             auth.save_upload('full', b'x')
-        before = set((auth.DIRECTORY / 'uploads').iterdir())
+        before = set(auth.UPLOADS.iterdir())
         with patch.object(auth, 'atomic', side_effect=OSError('failed')), self.assertRaises(OSError):
             auth.save_upload('failed.txt', b'failed')
-        self.assertEqual(set((auth.DIRECTORY / 'uploads').iterdir()), before)
+        self.assertEqual(set(auth.UPLOADS.iterdir()), before)
         self.assertEqual(first.read_bytes(), b'first')
+        # The browser UID reads uploads, so they must not live in the secret auth directory.
+        self.assertFalse(DEFAULT_UPLOADS.is_relative_to(DEFAULT_DIRECTORY))
+
+    def test_old_uploads_are_pruned_and_retention_is_configurable(self):
+        old, recent = auth.save_upload('old.txt', b'old'), auth.save_upload('recent.txt', b'recent')
+        stale = time.time() - 8 * 86400
+        os.utime(old.parent, (stale, stale))
+        outside = auth.DIRECTORY / 'outside'
+        outside.mkdir()
+        os.utime(outside, (stale, stale))
+        (auth.UPLOADS / 'link').symlink_to(outside)
+        self.assertEqual(auth.prune_uploads(), 1)
+        self.assertFalse(old.parent.exists())
+        self.assertTrue(recent.exists() and outside.exists())
+        auth.ATTEMPTS['other'] = (time.monotonic(), 2)
+        auth.refund_attempt('other')
+        self.assertEqual(auth.ATTEMPTS['other'][1], 1)
+        auth.refund_attempt('unknown')
+        for value, expected in [('0', 0), ('invalid', 7), ('-3', 0), ('30', 30)]:
+            with patch.dict(os.environ, {'WEGA_UPLOAD_RETENTION_DAYS': value}):
+                self.assertEqual(auth.retention_days(), expected)
+        with patch.dict(os.environ, {'WEGA_UPLOAD_RETENTION_DAYS': '0'}):
+            self.assertEqual(auth.prune_uploads(time.time() + 365 * 86400), 0)
+        self.assertEqual(auth.prune_uploads(time.time() + 8 * 86400), 1)
+        with patch.object(auth.shutil, 'rmtree', side_effect=OSError('busy')):
+            auth.save_upload('busy.txt', b'busy')
+            self.assertEqual(auth.prune_uploads(time.time() + 8 * 86400), 0)
+        with patch.object(auth, 'UPLOADS', auth.DIRECTORY / 'missing'):
+            self.assertEqual(auth.prune_uploads(), 0)
+
+
+class ConcurrencyAndTransportTests(AuthHelpers, unittest.TestCase):
+    def test_password_hashing_runs_without_the_global_lock(self):
+        import threading
+        observed = []
+        real = auth.digest
+        def probe(password, salt):
+            other = threading.Thread(target=lambda: observed.append(auth.LOCK.acquire(timeout=1) and auth.LOCK.release() is None))
+            other.start()
+            other.join()
+            return real(password, salt)
+        with patch.object(auth, 'digest', probe):
+            self.login()
+            token = self.login()
+            csrf = auth.SESSIONS[token]['csrf']
+            change = {'username': 'bob', 'password': 'new-unique-test-password', 'confirm_password': 'new-unique-test-password', 'current_password': 'a-unique-test-password'}
+            self.assertEqual(self.request('/auth/account', change, token, csrf)[0], 200)
+        self.assertTrue(observed)
+        self.assertTrue(all(observed), 'scrypt must not run while LOCK is held')
+
+    def test_attempts_are_charged_before_hashing(self):
+        # Parallel guesses cannot exceed the limit: each request is counted
+        # before the slow hash starts.
+        def guess(password, salt):
+            self.assertEqual(auth.ATTEMPTS['test-client'][1], 1)
+            return '00'
+        with patch.object(auth, 'digest', guess):
+            self.assertEqual(self.request('/auth/login', {'username': 'alice', 'password': 'wrong'})[0], 401)
+        auth.ATTEMPTS['test-client'] = (time.monotonic(), auth.ATTEMPT_LIMIT)
+        with patch.object(auth, 'digest') as digest:
+            self.assertEqual(self.request('/auth/login', {'username': 'alice', 'password': 'wrong'})[0], 429)
+            digest.assert_not_called()
+
+    def test_account_change_fails_if_session_was_revoked_during_hashing(self):
+        token = self.login()
+        csrf = auth.SESSIONS[token]['csrf']
+        real = auth.prepare
+        def revoke(username, password):
+            auth.SESSIONS.clear()
+            return real(username, password)
+        change = {'username': 'bob', 'password': 'new-unique-test-password', 'confirm_password': 'new-unique-test-password', 'current_password': 'a-unique-test-password'}
+        with patch.object(auth, 'prepare', revoke):
+            self.assertEqual(self.request('/auth/account', change, token, csrf)[0], 401)
+        self.assertTrue(auth.matches(auth.account(), 'alice', 'a-unique-test-password'))
+
+    def test_session_and_routing_failures_do_not_consume_attempts(self):
+        token = self.login()
+        csrf = auth.SESSIONS[token]['csrf']
+        self.assertEqual(self.request('/auth/account', {})[0], 401)
+        self.assertEqual(self.request('/auth/logout', {}, token, 'wrong')[0], 403)
+        self.assertEqual(self.request('/missing', {}, token, csrf)[0], 404)
+        self.assertNotIn('test-client', auth.ATTEMPTS)
+
+    @unittest.skipIf(os.name == 'nt', 'Unix sockets')
+    def test_gateway_serves_http_over_a_private_unix_socket(self):
+        import socket
+        import threading
+        path = auth.DIRECTORY / 'gateway.sock'
+        server = auth.UnixHTTPServer(str(path), auth.Handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o660)
+        with socket.socket(socket.AF_UNIX) as client:
+            client.settimeout(5)
+            client.connect(str(path))
+            client.sendall(b'GET /verify HTTP/1.0\r\n\r\n')
+            response = b''
+            while chunk := client.recv(4096):
+                response += chunk
+        self.assertTrue(response.startswith(b'HTTP/1.0 401'), response[:40])
+        # A stale socket from a previous run is replaced, not an error.
+        server.server_close()
+        path.touch()
+        auth.UnixHTTPServer(str(path), auth.Handler).server_close()
+        self.assertFalse(path.exists())
+
+
+WATCHDOG_SPEC = importlib.util.spec_from_file_location('wega_watchdog', Path(__file__).resolve().parents[1] / 'docker/supervisor-watchdog.py')
+watchdog = importlib.util.module_from_spec(WATCHDOG_SPEC)
+WATCHDOG_SPEC.loader.exec_module(watchdog)
+
+
+class SupervisorWatchdogTests(unittest.TestCase):
+    """Event-listener protocol and actions, with signals/processes as doubles."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='wega-watchdog-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        for name, value in [('CERTIFICATE', self.root / 'server.crt'), ('NGINX_PID', self.root / 'nginx.pid')]:
+            patcher = patch.object(watchdog, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def event(name, payload):
+        return f'ver:3.0 server:supervisor serial:1 pool:watchdog poolserial:1 eventname:{name} len:{len(payload)}\n{payload}'
+
+    def test_fatal_program_stops_supervisor_and_protocol_acknowledges_every_event(self):
+        events = self.event('PROCESS_STATE_FATAL', 'processname:browser groupname:browser from_state:BACKOFF') + self.event('PROCESS_STATE_UNKNOWN', '')
+        output = io.StringIO()
+        with patch.object(watchdog.os, 'kill') as kill, patch('sys.stderr', io.StringIO()) as log:
+            watchdog.main(io.StringIO(events), output, supervisor=4242)
+        kill.assert_called_once_with(4242, watchdog.signal.SIGTERM)
+        self.assertIn('browser entered FATAL', log.getvalue())
+        self.assertEqual(output.getvalue(), 'READY\nRESULT 2\nOK' * 2 + 'READY\n')
+
+    def test_handler_failures_never_break_the_protocol(self):
+        output = io.StringIO()
+        with patch.object(watchdog.os, 'kill', side_effect=PermissionError('denied')), patch('sys.stderr', io.StringIO()) as log:
+            watchdog.main(io.StringIO(self.event('PROCESS_STATE_FATAL', 'processname:vnc')), output, supervisor=1)
+        self.assertIn('event handling failed', log.getvalue())
+        self.assertEqual(output.getvalue(), 'READY\nRESULT 2\nOK' + 'READY\n')
+        with patch.object(watchdog.os, 'getppid', return_value=7), patch.object(watchdog, 'handle') as handle:
+            watchdog.main(io.StringIO(self.event('TICK_3600', 'when:1')), io.StringIO())
+        self.assertEqual(handle.call_args.args[2], 7)
+
+    def test_hourly_tick_renews_certificate_and_reloads_nginx_only_on_change(self):
+        from unittest.mock import Mock
+        watchdog.CERTIFICATE.write_bytes(b'old')
+        watchdog.NGINX_PID.write_text('321\n')
+        def renew(certificate):
+            def run(*_, **__):
+                if certificate is not None:
+                    watchdog.CERTIFICATE.write_bytes(certificate)
+                return Mock(returncode=0 if certificate is not None else 1)
+            return run
+        with patch('sys.stderr', io.StringIO()) as log, patch.object(watchdog.os, 'kill') as kill:
+            with patch.object(watchdog.subprocess, 'run', side_effect=renew(b'old')):
+                watchdog.handle({'eventname': 'TICK_3600'}, '', 1)
+            kill.assert_not_called()
+            with patch.object(watchdog.subprocess, 'run', side_effect=renew(None)):
+                watchdog.handle({'eventname': 'TICK_3600'}, '', 1)
+            self.assertIn('renewal check failed', log.getvalue())
+            kill.assert_not_called()
+            with patch.object(watchdog.subprocess, 'run', side_effect=renew(b'new')):
+                watchdog.handle({'eventname': 'TICK_3600'}, '', 1)
+            kill.assert_called_once_with(321, watchdog.signal.SIGHUP)
+            watchdog.NGINX_PID.unlink()
+            with patch.object(watchdog.subprocess, 'run', side_effect=renew(b'newer')):
+                watchdog.handle({'eventname': 'TICK_3600'}, '', 1)
+            self.assertIn('could not be reloaded', log.getvalue())
+        watchdog.CERTIFICATE.unlink()
+        self.assertIsNone(watchdog.fingerprint())
+
+    def test_script_entrypoint_exits_cleanly_when_supervisor_closes_stdin(self):
+        import contextlib
+        import runpy
+        with patch('sys.stdin', io.StringIO('')), contextlib.redirect_stdout(io.StringIO()) as output:
+            runpy.run_path(WATCHDOG_SPEC.origin, run_name='__main__')
+        self.assertEqual(output.getvalue(), 'READY\n')
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -82,7 +82,7 @@ impl Browser {
     }
     pub fn devtools_contents(&mut self, ui: &mut Ui) {
         let colors = crate::theme::palette(ui.ctx());
-        let view = self.tab().view.clone();
+        let view = self.view().clone();
         let owner = network::owner(view.id());
         self.tools.page(&view);
         let split = self.tools.split_console && self.tools.active != Tool::Console;
@@ -131,7 +131,7 @@ impl Browser {
                             .selectable_label(self.profile().devtools_dock == dock, label)
                             .clicked()
                         {
-                            self.apply(servo_browser::application::Command::Dock(dock));
+                            self.apply(wega::application::Command::Dock(dock));
                             self.tools.page(&view).inspector.reveal = true;
                             self.changed();
                             ui.close();
@@ -804,7 +804,7 @@ impl Browser {
                     {
                         let mut policy = self.profile().policy.clone();
                         policy.blocked_hosts.push_str(&format!("\n{domain}"));
-                        self.apply(servo_browser::application::Command::Policy(policy));
+                        self.apply(wega::application::Command::Policy(policy));
                         self.changed();
                     }
                     self.tools.notice = Some(format!("Blocked {domain}; reload to apply."));

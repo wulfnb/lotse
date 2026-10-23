@@ -2,6 +2,8 @@
 """Copy the selected GStreamer plugins and Mach-O dependency closure into our app.
 
 Only copies from the SDK/Homebrew; never edits or re-signs installed libraries.
+Refuses GPL/patent-encumbered codec libraries (FFmpeg, x264, ...) and writes a
+license notice for every bundled library with its Homebrew version and source.
 """
 from collections import deque
 from pathlib import Path
@@ -13,10 +15,55 @@ import shutil
 import subprocess
 import sys
 
+# FFmpeg (gst-libav), x264/x265 and FAAC are GPL or patent-encumbered. macOS
+# decodes through Apple's system codecs (gstapplemedia) instead; see vendor/README.md.
+FORBIDDEN=re.compile(r'lib(x264|x265|av|swscale|swresample|postproc|faac|gstlibav)',re.IGNORECASE)
+REPOSITORY='https://github.com/wulfnb/wega'
+
+def homebrew_formula(source):
+    match=re.search(r'/Cellar/([^/]+)/([^/]+)/',str(source))
+    return match.groups() if match else None
+
+def write_notices(path,manifest):
+    """Record each library's origin, license and source location for LGPL compliance."""
+    formulas=sorted({entry['formula'] for entry in manifest if 'formula' in entry})
+    info={}
+    if formulas:
+        for formula in json.loads(subprocess.check_output(['brew','info','--json=v2',*formulas],text=True))['formulae']:
+            info[formula['name']]=formula
+    lines=['Wega for macOS: bundled media libraries','',
+        'Contents/MacOS/lib contains these unmodified GStreamer plugins and their',
+        'dependencies, copied from Homebrew. GStreamer, GLib and several others are',
+        'licensed under the GNU LGPL; each is a separate dynamic library that you may',
+        'replace with a compatible modified build (afterwards re-sign the app ad hoc:',
+        'codesign --force --deep --sign - Wega.app). No FFmpeg, gst-libav, x264, x265',
+        'or other GPL codec library is included; video/audio decoding uses Apple\'s',
+        'system codecs through the gstapplemedia plugin.','']
+    for entry in manifest:
+        formula=info.get(entry.get('formula'),{})
+        lines.append(entry['file'])
+        if 'formula' in entry:
+            lines.append(f"  Homebrew formula: {entry['formula']} {entry['version']}")
+            lines.append(f"  License: {formula.get('license') or 'see upstream project'}")
+            if formula.get('homepage'):lines.append(f"  Project: {formula['homepage']}")
+            if formula.get('ruby_source_path'):lines.append(f"  Build recipe: https://github.com/Homebrew/homebrew-core/blob/HEAD/{formula['ruby_source_path']}")
+            source_url=((formula.get('urls') or {}).get('stable') or {}).get('url')
+            if source_url:lines.append(f"  Source (current formula release): {source_url}")
+        else:
+            lines.append(f"  Copied from: {entry['source']} (license: see upstream project)")
+        lines.append('')
+    lines+=['Written offer for source code','',
+        'For at least three years after a build is distributed, anyone may obtain the',
+        'complete corresponding source code of the LGPL-licensed libraries above, at',
+        'the exact versions listed, for no more than the cost of providing it. Request',
+        f'it by opening an issue at {REPOSITORY}/issues. Homebrew',
+        'keeps the build recipe for every version in its formula history.','']
+    path.write_text('\n'.join(lines))
+
 def bundle(app, root=None):
     root=Path(root) if root is not None else Path(__file__).resolve().parents[1]
     app=Path(app).resolve()
-    binary=app/'Contents/MacOS/servo-browser'
+    binary=app/'Contents/MacOS/wega'
     output=binary.parent/'lib'
     output.mkdir(parents=True,exist_ok=True)
     override=os.environ.get('SERVO_GSTREAMER_PLUGIN_DIR')
@@ -32,6 +79,7 @@ def bundle(app, root=None):
         source=Path(source).resolve()
         if not source.is_file():raise RuntimeError(f'Missing media dependency: {source}')
         name=source.name
+        if FORBIDDEN.match(name):raise RuntimeError(f'Refusing to bundle GPL/patent-encumbered codec library {name} from {source}')
         if name in seen:
             if seen[name]!=source:raise RuntimeError(f'Library name collision: {name}')
             return output/name
@@ -42,7 +90,10 @@ def bundle(app, root=None):
         temporary.chmod(0o755)
         temporary.replace(destination)
         queue.append((source,destination))
-        manifest.append({'file':name,'source':str(source)})
+        entry={'file':name,'source':str(source)}
+        formula=homebrew_formula(source)
+        if formula:entry['formula'],entry['version']=formula
+        manifest.append(entry)
         return destination
     for plugin in plugins:add(plugin_dir/f'lib{plugin}.dylib')
     queue.append((binary,binary))
@@ -74,6 +125,7 @@ def bundle(app, root=None):
     # Rewriting dependencies invalidates the executable's existing ad-hoc signature.
     (app/'Contents/Resources').mkdir(exist_ok=True)
     (app/'Contents/Resources/media-libraries.json').write_text(json.dumps(manifest,indent=2))
+    write_notices(app/'Contents/Resources/MEDIA-LIBRARIES.txt',manifest)
     # Seal the complete bundle only after every resource has been written.
     subprocess.run(['codesign','--force','--sign','-','--timestamp=none',str(app)],check=True)
     subprocess.run(['codesign','--verify','--deep','--strict',str(app)],check=True)

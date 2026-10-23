@@ -1,24 +1,62 @@
 services:
-  servo-browser:
-    image: servo-browser:local
+  wega:
+    image: wega:local
     build:
       context: .
       args:
-        BUILD_PROFILE: ${SERVO_BUILD_PROFILE:-release}
-        BUILD_JOBS: ${SERVO_BUILD_JOBS:-2}
+        BUILD_PROFILE: ${WEGA_BUILD_PROFILE:-release}
+        BUILD_JOBS: ${WEGA_BUILD_JOBS:-2}
+        CJK_FONTS: ${WEGA_CJK_FONTS:-1}
+        LICENSE_NOTICES: ${WEGA_LICENSE_NOTICES:-1}
     ports:
-      - "${SERVO_BIND_ADDRESS:-127.0.0.1}:${SERVO_PORT:-7443}:7443"
+      - "${WEGA_BIND_ADDRESS:-127.0.0.1}:${WEGA_PORT:-7443}:7443"
     environment:
-      BROWSER_RESOLUTION: ${SERVO_RESOLUTION:-1440x900}
-      BROWSER_START_URL: ${SERVO_START_URL:-about:blank}
-      BROWSER_USER: ${SERVO_WEB_USER:-servo}
-      BROWSER_PASSWORD: ${SERVO_WEB_PASSWORD:-}
+      BROWSER_RESOLUTION: ${WEGA_RESOLUTION:-1280x800}
+      BROWSER_START_URL: ${WEGA_START_URL:-about:blank}
+      BROWSER_USER: ${WEGA_WEB_USER:-wega}
+      BROWSER_PASSWORD: ${WEGA_WEB_PASSWORD:-}
+      BROWSER_TLS_SANS: ${WEGA_TLS_SANS:-}
+      WEGA_TRUSTED_PROXIES: ${WEGA_TRUSTED_PROXIES:-}
+      WEGA_RENDER_THREADS: ${WEGA_RENDER_THREADS:-2}
+      WEGA_VNC_WAIT: ${WEGA_VNC_WAIT:-50}
+      WEGA_UPLOAD_RETENTION_DAYS: ${WEGA_UPLOAD_RETENTION_DAYS:-7}
     volumes:
-      - servo-profile:/config
-      - ${SERVO_DOWNLOAD_DIR:-./downloads}:/config/Downloads
-    shm_size: 512mb
+      - wega-profile:/config
+      - ${WEGA_DOWNLOAD_DIR:-./downloads}:/config/Downloads
+    # Hardening: read-only image filesystem, no privilege escalation, and only
+    # the capabilities the root entrypoint/supervisor needs to prepare volumes
+    # and start the unprivileged workers: CHOWN/DAC_OVERRIDE/FOWNER/FSETID for
+    # ownership and setgid socket/upload folders, SETUID/SETGID for gosu, KILL
+    # to stop workers. Workers run as non-root users and keep no capabilities.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+      - /run:size=16m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - FSETID
+      - SETUID
+      - SETGID
+      - KILL
+    pids_limit: ${WEGA_PIDS_LIMIT:-512}
+    mem_limit: ${WEGA_MEM_LIMIT:-2g}
+    cpus: ${WEGA_CPUS:-2}
+    shm_size: ${WEGA_SHM_SIZE:-512mb}
+    # Optional GPU device passthrough (see docs/docker.md). With Xvfb the
+    # browser still renders on the CPU; this alone does not accelerate it.
+    # devices:
+    #   - /dev/dri:/dev/dri
+    # group_add:
+    #   - "${WEGA_RENDER_GID}" # host: getent group render | cut -d: -f3
     init: false # tini is already the image entrypoint
+    # A program that keeps failing makes supervisord exit; this restarts it.
     restart: unless-stopped
     stop_grace_period: 20s
 volumes:
-  servo-profile:
+  wega-profile:

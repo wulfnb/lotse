@@ -13,8 +13,8 @@ def main(args=None, root=None):
     if operation not in ('show', 'encrypt-env'):
         sys.exit('Usage: python3 scripts/web-credentials.py show|encrypt-env')
     command = 'show-bootstrap' if operation == 'show' else 'encrypt-current-bootstrap'
-    result = subprocess.check_output(['docker', 'compose', 'exec', '-T', 'servo-browser',
-                                      'python3', '/opt/servo/auth-service.py', command], cwd=root, text=True)
+    result = subprocess.check_output(['docker', 'compose', 'exec', '-T', 'wega',
+                                      'python3', '/opt/wega/auth-service.py', command], cwd=root, text=True)
     if operation == 'show':
         print(result, end='')
     else:

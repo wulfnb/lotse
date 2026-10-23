@@ -12,9 +12,9 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path.split('?', 1)[0] == '/interaction.html':
             self.send_header('Cache-Control', 'no-store')
         if self.path.split('?', 1)[0] == '/toolbox.html':
-            self.send_header('Set-Cookie', 'lotse_visible=visible-fixture; Path=/; SameSite=Lax')
-            self.send_header('Set-Cookie', 'lotse_http_only=native-only-fixture; Path=/; HttpOnly; SameSite=Strict; Expires=Wed, 21 Oct 2037 07:28:00 GMT')
-            self.send_header('Set-Cookie', 'lotse_wrong_path=not-for-page; Path=/different-cookie-scope; HttpOnly')
+            self.send_header('Set-Cookie', 'wega_visible=visible-fixture; Path=/; SameSite=Lax')
+            self.send_header('Set-Cookie', 'wega_http_only=native-only-fixture; Path=/; HttpOnly; SameSite=Strict; Expires=Wed, 21 Oct 2037 07:28:00 GMT')
+            self.send_header('Set-Cookie', 'wega_wrong_path=not-for-page; Path=/different-cookie-scope; HttpOnly')
         super().end_headers()
     def send_json(self, status, data):
         body = json.dumps(data).encode()

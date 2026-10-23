@@ -98,3 +98,31 @@ fn history_targets_preserve_duplicate_urls_and_validate_boundaries() {
     history.update(vec![], 0);
     assert_eq!(history.target(true), None);
 }
+
+#[test]
+fn web_content_cannot_open_local_files_or_top_level_data_documents() {
+    let url = |s: &str| url::Url::parse(s).unwrap();
+    let web = url("https://example.com/");
+    let file = url("file:///tmp/a.html");
+    let data = url("data:text/html,<h1>x</h1>");
+    let internal = url("wega://history");
+    assert!(!content_navigation_allowed(&file, Some(&web)));
+    assert!(!content_navigation_allowed(&file, None), "Script popups");
+    assert!(!content_navigation_allowed(&data, Some(&web)));
+    assert!(!content_navigation_allowed(&data, Some(&data)));
+    assert!(!content_navigation_allowed(&file, Some(&data)));
+    assert!(
+        content_navigation_allowed(&file, Some(&file)),
+        "Local fixtures link to each other"
+    );
+    assert!(
+        content_navigation_allowed(&file, Some(&internal)),
+        "History lists local files"
+    );
+    assert!(content_navigation_allowed(&data, Some(&internal)));
+    assert!(content_navigation_allowed(&web, Some(&file)));
+    assert!(content_navigation_allowed(
+        &url("blob:https://example.com/x"),
+        Some(&web)
+    ));
+}

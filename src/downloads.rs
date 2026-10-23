@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, MutexGuard, PoisonError,
         atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering},
     },
     thread::{self, JoinHandle},
@@ -15,6 +15,18 @@ use std::{
 };
 
 const SEGMENT: u64 = 2 * 1024 * 1024;
+/// Prefix of in-progress files in the download folder (hidden on Unix).
+const TEMP_PREFIX: &str = ".wega-";
+
+/// A worker that panicked while holding a lock must not take the UI down with it;
+/// progress is plain data, so the last written state is still meaningful.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Called with the published path and source URL so the desktop layer can attach
+/// platform "mark of the web" metadata. Best effort; it must not fail the download.
+pub type Marker = Arc<dyn Fn(&Path, &str) + Send + Sync>;
 const RUN: u8 = 0;
 const PAUSE: u8 = 1;
 const CANCEL: u8 = 2;
@@ -66,8 +78,12 @@ impl Job {
     pub fn cancel(&self) {
         self.command.store(CANCEL, Ordering::Relaxed);
     }
+    /// Snapshot of the current progress; never panics on a poisoned lock.
+    pub fn snapshot(&self) -> Progress {
+        lock(&self.progress).clone()
+    }
     fn phase(&self, phase: Phase, message: &str) {
-        let mut p = self.progress.lock().unwrap();
+        let mut p = lock(&self.progress);
         p.phase = phase;
         p.message = message.into();
     }
@@ -110,6 +126,7 @@ pub struct Manager {
     pub directory: PathBuf,
     work: PathBuf,
     next: u64,
+    pub marker: Option<Marker>,
 }
 impl Manager {
     pub fn new(profile: &Path) -> Self {
@@ -124,6 +141,7 @@ impl Manager {
             directory,
             work: profile.join("download-work"),
             next: 0,
+            marker: None,
         }
     }
     pub fn jobs(&self) -> Vec<Arc<Job>> {
@@ -132,7 +150,7 @@ impl Manager {
     pub fn clear_finished(&mut self) {
         self.items.retain(|i| {
             !matches!(
-                i.job.progress.lock().unwrap().phase,
+                lock(&i.job.progress).phase,
                 Phase::Complete | Phase::Failed | Phase::Cancelled
             )
         });
@@ -151,7 +169,7 @@ impl Manager {
             .filter(|i| {
                 i.job.command.load(Ordering::Relaxed) == RUN
                     && !matches!(
-                        i.job.progress.lock().unwrap().phase,
+                        lock(&i.job.progress).phase,
                         Phase::Complete | Phase::Failed | Phase::Cancelled
                     )
             })
@@ -210,6 +228,7 @@ impl Manager {
         let target = self.directory.clone();
         let user_name = filename.to_owned();
         let background = job.clone();
+        let marker = self.marker.clone();
         let worker = thread::Builder::new()
             .name("download".into())
             .spawn(move || {
@@ -223,8 +242,14 @@ impl Manager {
                 );
                 match result {
                     Ok(path) => {
-                        let mut p = background.progress.lock().unwrap();
-                        p.filename = path.file_name().unwrap().to_string_lossy().into();
+                        if let Some(mark) = &marker {
+                            mark(&path, &background.url);
+                        }
+                        let mut p = lock(&background.progress);
+                        p.filename = path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         p.path = Some(path);
                         p.phase = Phase::Complete;
                         p.message = "Saved".into();
@@ -390,6 +415,104 @@ fn headers(path: &Path) -> Result<Meta, String> {
     }
     Ok(result)
 }
+/// Absolute path of the system curl. PATH is not consulted, so a writable directory
+/// earlier in PATH cannot substitute the program that receives session cookies.
+pub fn curl_program() -> Option<PathBuf> {
+    curl_candidates().into_iter().find(|path| path.is_file())
+}
+fn curl_candidates() -> Vec<PathBuf> {
+    if cfg!(windows) {
+        let root = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .filter(|root| root.is_absolute())
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        vec![root.join("System32").join("curl.exe")]
+    } else {
+        [
+            "/usr/bin/curl",
+            "/bin/curl",
+            "/usr/local/bin/curl",
+            "/run/current-system/sw/bin/curl",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+    }
+}
+
+/// Windows "mark of the web" stream content (Internet zone).
+pub fn zone_identifier(url: &str) -> String {
+    let url = url.replace(['\r', '\n'], "");
+    format!("[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl={url}\r\nHostUrl={url}\r\n")
+}
+/// macOS `com.apple.quarantine` value: flags; hex seconds since the epoch; agent; event id.
+pub fn quarantine_value(unix_seconds: u64, agent: &str) -> String {
+    format!("0081;{unix_seconds:08x};{agent};")
+}
+/// Files that run code when opened. Opening them from Downloads needs confirmation.
+pub fn opens_as_program(path: &Path) -> bool {
+    const RISKY: &[&str] = &[
+        "app",
+        "command",
+        "tool",
+        "sh",
+        "bash",
+        "zsh",
+        "csh",
+        "ksh",
+        "fish",
+        "pkg",
+        "mpkg",
+        "dmg",
+        "exe",
+        "msi",
+        "msix",
+        "appx",
+        "bat",
+        "cmd",
+        "com",
+        "scr",
+        "pif",
+        "cpl",
+        "ps1",
+        "psm1",
+        "vbs",
+        "vbe",
+        "js",
+        "jse",
+        "wsf",
+        "wsh",
+        "hta",
+        "lnk",
+        "reg",
+        "jar",
+        "jnlp",
+        "scpt",
+        "applescript",
+        "workflow",
+        "terminal",
+        "desktop",
+        "appimage",
+        "run",
+        "bin",
+        "deb",
+        "rpm",
+        "py",
+        "pl",
+        "rb",
+        "php",
+        "url",
+        "webloc",
+        "inetloc",
+        "iso",
+        "img",
+        "vhd",
+        "vhdx",
+    ];
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| RISKY.iter().any(|risky| ext.eq_ignore_ascii_case(risky)))
+}
 fn curl(
     job: &Job,
     work: &Path,
@@ -401,7 +524,9 @@ fn curl(
 ) -> Result<Meta, String> {
     let (body, header) = files;
     let error = body.with_extension("error");
-    let mut command = Command::new("curl");
+    let mut command = Command::new(curl_program().ok_or(
+        "curl was not found in the system directories; it is required for secure streaming downloads.",
+    )?);
     command
         .args([
             "--disable",
@@ -444,11 +569,7 @@ fn curl(
     }
     let mut child = command
         .spawn()
-        .map_err(|e| if e.kind() == io::ErrorKind::NotFound {
-            "The 'curl' program was not found in PATH; curl is required for secure streaming downloads.".into()
-        } else {
-            format!("Cannot start curl: {e}")
-        })?;
+        .map_err(|e| format!("Cannot start curl: {e}"))?;
     loop {
         if job.command.load(Ordering::Relaxed) != RUN || abort.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -559,7 +680,7 @@ fn run(
             v.store(0, Ordering::Relaxed);
         }
         {
-            let mut p = job.progress.lock().unwrap();
+            let mut p = lock(&job.progress);
             p.phase = Phase::Downloading;
             p.filename = name.clone();
             p.total = meta.length();
@@ -585,7 +706,7 @@ fn run(
                 for v in &job.inflight {
                     v.store(0, Ordering::Relaxed);
                 }
-                job.progress.lock().unwrap().total = Some(actual);
+                lock(&job.progress).total = Some(actual);
                 return publish(&body, target, &name);
             }
             Err(_) if multipart => {
@@ -677,7 +798,7 @@ fn parallel(
                         }
                         Err(e) => {
                             let _ = fs::remove_file(incoming);
-                            let mut first = error.lock().unwrap();
+                            let mut first = lock(error);
                             if first.is_none() {
                                 *first = Some(e)
                             }
@@ -689,7 +810,7 @@ fn parallel(
             });
         }
     });
-    if let Some(error) = error.into_inner().unwrap() {
+    if let Some(error) = error.into_inner().unwrap_or_else(PoisonError::into_inner) {
         return Err(error);
     }
     if job.command.load(Ordering::Relaxed) != RUN {
@@ -730,7 +851,7 @@ fn publish(body: &Path, target: &Path, name: &str) -> Result<PathBuf, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let temp = target.join(format!(".servo-{nonce}.tmp"));
+    let temp = target.join(format!("{TEMP_PREFIX}{nonce}.tmp"));
     let result = (|| {
         let mut output = OpenOptions::new()
             .write(true)

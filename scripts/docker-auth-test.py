@@ -15,10 +15,10 @@ def docker(*args):
     return subprocess.check_output(["docker", *args], cwd=ROOT, text=True)
 
 
-container = docker("compose", "ps", "-q", "servo-browser").strip()
+container = docker("compose", "ps", "-q", "wega").strip()
 info = json.loads(docker("inspect", container))[0]
 environment = dict(item.split("=", 1) for item in info["Config"]["Env"])
-credentials = json.loads(docker("exec", container, "python3", "/opt/servo/auth-service.py", "bootstrap-json"))
+credentials = json.loads(docker("exec", container, "python3", "/opt/wega/auth-service.py", "bootstrap-json"))
 port = int(info["NetworkSettings"]["Ports"]["7443/tcp"][0]["HostPort"])
 host = f"localhost:{port}"
 context = ssl._create_unverified_context()  # Local generated certificate.
@@ -47,7 +47,7 @@ def request(path, cookie=None, websocket=False, data=None):
         connection.close()
 
 
-filename = "servo-auth-check-" + uuid.uuid4().hex + ".txt"
+filename = "wega-auth-check-" + uuid.uuid4().hex + ".txt"
 payload = "Authenticated download mount check\n"
 try:
     docker("exec", "--user", "browser", container, "python3", "-c",
@@ -61,7 +61,7 @@ try:
     cookie = cookie_header.split(";", 1)[0]
     for path in ("/index.html", "/viewer.js", "/novnc/core/rfb.js", "/downloads/", f"/downloads/{filename}"):
         assert request(path)[0] == 401, f"Anonymous access allowed: {path}"
-        assert request(path, "__Host-servo_session=invalid")[0] == 401
+        assert request(path, "__Host-wega_session=invalid")[0] == 401
         assert request(path, cookie)[0] == 200, f"Session access failed: {path}"
     assert request("/healthz")[:2] == (200, b"ok\n")
     assert request("/websockify", websocket=True)[0] == 401

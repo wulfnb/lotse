@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Impressum &amp; Datenschutz — Wega Browser</title>
+  <meta name="description" content="Impressum (§ 5 DDG) und Datenschutzhinweise für die Wega-Browser-Projektwebsite.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    :root {
+      --bg: #061513;
+      --surface: #0a201d;
+      --surface-border: #143833;
+      --accent: #10b981;
+      --accent-light: #6ee7b7;
+      --text: #ecfdf5;
+      --text-muted: #94a3b8;
+      --radius: 12px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background-color: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    :focus-visible { outline: 3px solid var(--accent-light); outline-offset: 4px; }
+    .container { max-width: 820px; margin: 0 auto; padding: 0 24px; }
+    header { border-bottom: 1px solid var(--surface-border); padding: 20px 0; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.2rem; }
+    .brand img { width: 32px; height: 32px; }
+    main { padding: 48px 0 64px; }
+    h1 { font-size: 2rem; margin-bottom: 8px; }
+    h2 { font-size: 1.3rem; color: var(--accent-light); margin: 40px 0 12px; }
+    h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+    p, li, address { color: var(--text-muted); margin-bottom: 12px; font-style: normal; }
+    ul { padding-left: 20px; }
+    a { color: var(--accent-light); }
+    .card { background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius); padding: 24px; }
+    /* Placeholders the site owner must replace before publishing. */
+    .placeholder { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px dashed #f59e0b; border-radius: 4px; padding: 0 4px; }
+    footer { border-top: 1px solid var(--surface-border); padding: 32px 0; color: var(--text-muted); font-size: 0.85rem; text-align: center; }
+    @media (max-width: 600px) { .container { padding: 0 16px; } h1 { font-size: 1.6rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="container">
+      <a href="index.html" class="brand"><img src="logo.png" alt="">Wega</a>
+    </div>
+  </header>
+  <main class="container">
+    <h1>Impressum</h1>
+    <p>Angaben gemäß § 5 Digitale-Dienste-Gesetz (DDG)</p>
+    <div class="card">
+      <address>
+        Noufal Babu A S<br>
+        <span class="placeholder">[Straße Hausnummer]</span><br>
+        <span class="placeholder">[PLZ Ort]</span><br>
+        Deutschland
+      </address>
+      <p>E-Mail: <span class="placeholder">[E-Mail-Adresse]</span></p>
+      <p>Wega ist ein privates, nicht-kommerzielles Open-Source-Projekt. Fragen zum
+      Projekt können auch über die <a href="https://github.com/wulfnb/wega/issues">GitHub-Issues</a>
+      gestellt werden.</p>
+    </div>
+
+    <h2 id="datenschutz">Datenschutzerklärung</h2>
+    <h3>Verantwortlicher</h3>
+    <p>Verantwortlich für die Datenverarbeitung auf dieser Website im Sinne der
+    Datenschutz-Grundverordnung (DSGVO) ist die oben im Impressum genannte Person.</p>
+
+    <h3>Hosting über GitHub Pages</h3>
+    <p>Diese Website wird über GitHub Pages bereitgestellt, einen Dienst der GitHub, Inc.,
+    88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, USA. Beim Aufruf der Seiten
+    verarbeitet GitHub technisch notwendige Daten, insbesondere Ihre IP-Adresse, Datum und
+    Uhrzeit des Zugriffs, die aufgerufene Seite sowie Browser- und Betriebssysteminformationen
+    in Server-Logdateien. Dies dient der sicheren und zuverlässigen Auslieferung der Website
+    (Art. 6 Abs. 1 lit. f DSGVO). Dabei können Daten in die USA übermittelt werden. Einzelheiten
+    zu Zweck, Speicherdauer und Garantien für die Übermittlung finden Sie in der
+    <a href="https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement">Datenschutzerklärung von GitHub</a>.
+    Der Projektverantwortliche selbst hat keinen Zugriff auf diese Logdateien.</p>
+
+    <h3>Downloads</h3>
+    <p>Die Download-Links führen zu GitHub Releases bzw. zur GitHub Container Registry.
+    Beim Herunterladen gelten ebenfalls die Datenschutzbestimmungen von GitHub.</p>
+
+    <h3>Keine Cookies, kein Tracking</h3>
+    <p>Diese Website setzt keine Cookies, verwendet keine Analyse- oder Tracking-Werkzeuge und
+    lädt keine Schriftarten, Skripte oder sonstigen Inhalte von Drittanbietern. Alle Dateien
+    (HTML, Bilder, ein kleines Skript zum Kopieren des Docker-Befehls) werden direkt von
+    GitHub Pages ausgeliefert.</p>
+
+    <h3>Kontaktaufnahme</h3>
+    <p>Wenn Sie per E-Mail Kontakt aufnehmen, werden Ihre Angaben ausschließlich zur
+    Bearbeitung Ihrer Anfrage verwendet (Art. 6 Abs. 1 lit. f DSGVO) und gelöscht, sobald
+    sie dafür nicht mehr erforderlich sind. Beiträge in GitHub-Issues sind öffentlich und
+    unterliegen den Bedingungen von GitHub.</p>
+
+    <h3>Ihre Rechte</h3>
+    <p>Sie haben das Recht auf Auskunft (Art. 15 DSGVO), Berichtigung (Art. 16), Löschung
+    (Art. 17), Einschränkung der Verarbeitung (Art. 18), Datenübertragbarkeit (Art. 20) und
+    Widerspruch (Art. 21). Außerdem können Sie sich bei einer Datenschutz-Aufsichtsbehörde
+    beschweren (Art. 77 DSGVO).</p>
+
+    <h2 id="privacy">Privacy summary (English)</h2>
+    <p>This site is hosted on GitHub Pages. GitHub processes server logs, including your IP
+    address, to deliver the site; see GitHub's privacy statement. The site sets no cookies,
+    uses no analytics and loads no third-party resources. Downloads are served by GitHub
+    Releases and the GitHub Container Registry. The Wega browser itself contains no telemetry.</p>
+  </main>
+  <footer>
+    <div class="container">
+      &copy; 2026 Noufal Babu A S and contributors · <a href="index.html">Wega Browser</a>
+    </div>
+  </footer>
+</body>
+</html>

@@ -21,13 +21,17 @@ def docker(*args):
 
 
 def main():
-    name = 'lotse-ux-' + uuid.uuid4().hex[:10]
-    container = docker('run', '--rm', '-d', '--name', name, '-p', '127.0.0.1::7443',
+    name = 'wega-ux-' + uuid.uuid4().hex[:10]
+    hardening = ['--read-only', '--tmpfs', '/tmp:size=256m,mode=1777', '--tmpfs', '/run:size=16m,mode=0755',
+                 '--security-opt', 'no-new-privileges:true', '--cap-drop', 'ALL',
+                 *[arg for cap in ('CHOWN', 'DAC_OVERRIDE', 'FOWNER', 'FSETID', 'SETUID', 'SETGID', 'KILL')
+                   for arg in ('--cap-add', cap)]]
+    container = docker('run', '--rm', '-d', '--name', name, '-p', '127.0.0.1::7443', *hardening,
                        '-e', 'BROWSER_USER=ux-test', '-e', 'BROWSER_PASSWORD=isolated-ux-test-password',
-                       '-v', f'{ROOT / "docker/auth-service.py"}:/opt/servo/auth-service.py:ro',
-                       '-v', f'{ROOT / "docker/viewer"}:/opt/servo/viewer:ro',
+                       '-v', f'{ROOT / "docker/auth-service.py"}:/opt/wega/auth-service.py:ro',
+                       '-v', f'{ROOT / "docker/viewer"}:/opt/wega/viewer:ro',
                        '-v', f'{ROOT / "docker/nginx.conf"}:/etc/nginx/nginx.conf:ro',
-                       sys.argv[1] if len(sys.argv) > 1 else 'servo-browser:local')
+                       sys.argv[1] if len(sys.argv) > 1 else 'wega:local')
     try:
         port = int(docker('port', container, '7443/tcp').rsplit(':', 1)[1])
         host = f'127.0.0.1:{port}'
@@ -52,6 +56,13 @@ def main():
                 raise AssertionError('Isolated gateway did not start')
             time.sleep(0.25)
         docker('exec', container, 'nginx', '-t', '-e', 'stderr')
+        # Pages in the browser can reach any loopback TCP port, so nothing but
+        # the authenticated HTTPS listener may listen on TCP (VNC, WebSocket
+        # bridge and gateway use Unix sockets).
+        tables = docker('exec', container, 'cat', '/proc/net/tcp', '/proc/net/tcp6')
+        listening = {int(line.split()[1].rsplit(':', 1)[1], 16) for line in tables.splitlines()
+                     if len(line.split()) > 3 and line.split()[3] == '0A'}
+        assert listening == {7443}, f'Unexpected TCP listeners: {sorted(listening)}'
         origin = {'Origin': f'https://{host}'}
         assert request('/auth/upload', b'file', origin)[0] == 401
         login = json.dumps({'username': 'ux-test', 'password': 'isolated-ux-test-password'}).encode()
@@ -74,11 +85,14 @@ def main():
                       path) == 'readable'
         assert request('/auth/uploads/')[0] != 200
         assert request('/index.html')[0] == 401
+        # The gateway's secrets are not readable by the browser UID.
+        assert subprocess.run(['docker', 'exec', '--user', 'browser', container, 'cat', '/config/auth/key'],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
         page = request('/index.html', headers=session)[1]
         assert b'id="upload"' in page and b'id="viewport-mode"' in page
         script = request('/viewer.js', headers=session)[1]
         assert b'/auth/upload' in script and b'resizeSession' in script
-        print('PASS: nginx syntax, authentication, CSRF/origin/size guards, private file handoff and current viewer assets')
+        print('PASS: hardened runtime, TCP listeners limited to HTTPS, private gateway secrets, nginx syntax, authentication, CSRF/origin/size guards, private file handoff and current viewer assets')
     finally:
         subprocess.run(['docker', 'rm', '-f', container], check=True, stdout=subprocess.DEVNULL)
 

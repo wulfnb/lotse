@@ -1,6 +1,6 @@
 # Disposable test tooling; never used as the application/release image.
-ARG LOTSE_BASE=servo-browser:local
-FROM ${LOTSE_BASE}
+ARG WEGA_BASE=wega:local
+FROM ${WEGA_BASE}
 USER root
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends kcov \

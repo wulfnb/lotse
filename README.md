@@ -1,52 +1,64 @@
-# Lotse Browser (Alpha Test Release)
+# Wega Browser (Alpha Test Release)
+
+*Wega* is the German name of Vega, the bright star in the constellation Lyra.
+It was the pole star around 12,000 BC and will be again around 13,700 AD.
 
 A native Rust desktop browser engineered in Germany that embeds the open-source **Servo 0.7.0** web engine. Websites are fetched,
 parsed, styled, painted, and executed by Servo. The interface uses egui 0.37 and
 winit. Servo's WebRender and the browser chrome share a Surfman/OpenGL context;
 each tab renders into its own offscreen framebuffer, composited into the window.
 
-The purple browser chrome follows the supplied Firefox reference. Tabs can be
+The browser chrome uses Wega's own emerald theme. It is an independent design and
+contains no Firefox code or artwork. Tabs can be
 placed above the address bar or in a resizable sidebar and dragged to reorder.
 Changing layouts keeps the existing webviews and their page state alive.
 
 ## Download
 
-[Website](https://wulfnb.github.io/lotse/) · [All releases](https://github.com/wulfnb/lotse/releases) · [SHA256 checksums](https://github.com/wulfnb/lotse/releases/download/test-preview/SHA256SUMS.txt)
+[Website](https://wulfnb.github.io/wega/) · [All releases](https://github.com/wulfnb/wega/releases) · [SHA256 checksums](https://github.com/wulfnb/wega/releases/download/test-preview/SHA256SUMS.txt)
 
 | Platform | Download Alpha Preview |
 | --- | --- |
-| macOS · Apple Silicon (ARM64) | [Download DMG](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.dmg) · [Download ZIP](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-macOS-arm64.zip) |
-| Windows · x64 | [Download ZIP](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Windows-x64.zip) |
-| Linux · x86_64 | [Download tar.gz](https://github.com/wulfnb/lotse/releases/download/test-preview/Lotse-Linux-x86_64.tar.gz) |
+| macOS · Apple Silicon (ARM64) | [Download DMG](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-macOS-arm64.dmg) · [Download ZIP](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-macOS-arm64.zip) |
+| Windows · x64 | [Download ZIP](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Windows-x64.zip) |
+| Linux · x86_64 | [Download tar.gz](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Linux-x86_64.tar.gz) |
 
 These links download the current `test-preview` prerelease. Linux setup requirements
 are included in the archive's README.
+
+On macOS, open the DMG and drag **Wega.app** into **Applications**, then launch
+the installed app from Applications. The alpha is ad-hoc signed and **not
+notarized by Apple**, so macOS may require you to approve that specific app in
+**System Settings → Privacy & Security → Open Anyway** after trying to open it.
+You do not need a paid Apple developer membership to run it. See the
+[macOS installation instructions](docs/install-macos.txt). The ZIP download is
+also available if the DMG layout is inconvenient.
 
 > ### ⚠️ Alpha Test Notice & Legal Disclaimer / Haftungsausschluss
 >
 > **This is an experimental Alpha preview (`v0.1.0-alpha.1`) intended strictly for testing, developer evaluation, and feedback.**
 >
-> 1. **Experimental Engine**: Lotse embeds the Servo web engine. Websites are rendered and executed using an engine that is under continuous active open-source development and does not yet implement all web security standards or process isolation mechanisms found in production browsers.
-> 2. **User Responsibility**: Lotse is **not** intended for security-sensitive activities such as online banking, financial transactions, or critical personal data. Any use of this experimental software is at your own risk (*Nutzung auf eigene Gefahr*).
+> 1. **Experimental Engine**: Wega embeds the Servo web engine. Websites are rendered and executed using an engine that is under continuous active open-source development and does not yet implement all web security standards or process isolation mechanisms found in production browsers.
+> 2. **User Responsibility**: Wega is **not** intended for security-sensitive activities such as online banking, financial transactions, or critical personal data. Any use of this experimental software is at your own risk (*Nutzung auf eigene Gefahr*).
 > 3. **Limitation of Liability (German Law)**: This software is provided free of charge (*unentgeltlich*). Pursuant to § 521 of the German Civil Code (BGB), liability of the developers and contributors is limited to intent (*Vorsatz*) and gross negligence (*grobe Fahrlässigkeit*).
-> 4. **Trademark Notice**: Servo is a trademark of the Linux Foundation. Lotse is an independent project and is not affiliated with or endorsed by the Linux Foundation or Mozilla.
+> 4. **Trademark Notice**: Servo is a trademark of the Linux Foundation. Wega is an independent project and is not affiliated with or endorsed by the Linux Foundation or Mozilla.
 
-## Why Lotse? (Motivation)
+## Why Wega? (Motivation)
 
-Modern web browsing has largely converged into a monoculture of memory-hungry, corporate-controlled browsers. Lotse was born out of three immediate personal needs and a broader architectural vision:
+Modern web browsing has largely converged into a monoculture of memory-hungry, corporate-controlled browsers. Wega was born out of three immediate personal needs and a broader architectural vision:
 
 1. **Turning the Servo Engine into a Real Everyday Browser**:
-   Servo is one of the most exciting achievements in modern systems programming—a ground-up parallel web engine written in Rust. Yet for years, it has existed primarily as an embedded research library or tech demo. Lotse takes Servo and builds an actual, usable desktop browser around it: complete with movable tabs, bookmarks, history, developer tools, download managers, and window management.
+   Servo is one of the most exciting achievements in modern systems programming—a ground-up parallel web engine written in Rust. Yet for years, it has existed primarily as an embedded research library or tech demo. Wega takes Servo and builds an actual, usable desktop browser around it: complete with movable tabs, bookmarks, history, developer tools, download managers, and window management.
 2. **The Ideal Lightweight Homelab Browser**:
-   In homelab and self-hosted environments, accessing internal dashboards, web services, and the internet directly from the server typically requires running heavy remote desktop environments (like XFCE + Chrome) that consume gigabytes of RAM. Lotse was designed to run seamlessly in a lightweight Docker container with built-in authenticated HTTPS, noVNC streaming, and minimal server overhead.
+   In homelab and self-hosted environments, accessing internal dashboards, web services, and the internet directly from the server typically requires running heavy remote desktop environments (like XFCE + Chrome) that consume gigabytes of RAM. Wega was designed to run seamlessly in a lightweight Docker container with built-in authenticated HTTPS, noVNC streaming, and minimal server overhead.
 3. **Escaping RAM Bloat & System Freezes**:
-   Mainstream browsers frequently spawn dozens of background helper processes and consume 4–8 GB of RAM for only a few tabs, causing system stuttering, thermal throttling, and freezes on resource-constrained systems. Lotse leverages Rust's zero-cost abstractions, egui's immediate-mode GUI, and Servo's parallel WebRender pipeline to maintain a lean, predictable memory footprint.
+   Mainstream browsers frequently spawn dozens of background helper processes and consume 4–8 GB of RAM for only a few tabs, causing system stuttering, thermal throttling, and freezes on resource-constrained systems. Wega leverages Rust's zero-cost abstractions, egui's immediate-mode GUI, and Servo's parallel WebRender pipeline to maintain a lean, predictable memory footprint.
 
 ### Why This Project Matters for the Web
 
 * **Breaking the Chromium Monoculture**: With almost every modern browser (Chrome, Edge, Brave, Opera, Vivaldi, Arc) now relying on Google's Blink engine, web standards are increasingly dictated by a single advertising company. Fostering a viable Servo-based browser is crucial for long-term open web diversity.
-* **Radical Privacy with Zero Telemetry**: Modern commercial browsers constantly phone home with user profiling, diagnostic metrics, and search telemetry. Lotse has zero telemetry, zero analytics tracking, and no hidden network calls.
-* **Memory Safety by Design**: Over 70% of historical browser vulnerabilities stem from C/C++ memory corruption (use-after-free, buffer overruns). By building on Rust with `#![forbid(unsafe_code)]` in its application domain, Lotse eliminates entire categories of critical browser security flaws.
+* **Radical Privacy with Zero Telemetry**: Modern commercial browsers constantly phone home with user profiling, diagnostic metrics, and search telemetry. Wega has zero telemetry, zero analytics tracking, and no hidden network calls.
+* **More Memory Safety, Honestly Scoped**: Many historical browser vulnerabilities stem from C/C++ memory corruption (use-after-free, buffer overruns). Wega's own code is Rust: the platform-independent library crate is compiled with `#![forbid(unsafe_code)]`, and the desktop binary keeps its `unsafe` to a few small, reviewed blocks (OpenGL context, AppKit/macOS APIs, native media, process resource queries and environment setup before threads start). Memory safety is **not** end-to-end, though: the Servo engine embeds SpiderMonkey (C++ with a JIT compiler) and GStreamer's C media stack, and by default everything runs in a single process without a sandbox. A bug in those components can still compromise the browser.
 
 ## Run
 
@@ -59,10 +71,10 @@ cargo run
 # Open a particular website:
 cargo run -- https://www.google.com/
 # Use a separate browser profile:
-cargo run -- --profile-dir /tmp/servo-browser-profile https://example.com/
+cargo run -- --profile-dir /tmp/wega-profile https://example.com/
 ```
 
-On macOS, `scripts/package-macos.sh --debug` creates `target/Lotse.app`
+On macOS, `scripts/package-macos.sh --debug` creates `target/Wega.app`
 from the debug build. Run the script without `--debug` for an optimized app bundle.
 
 `cargo run --release` builds an optimized browser. Dependencies are locked in
@@ -75,19 +87,26 @@ See the [Servo embedding guide](https://book.servo.org/embedding/overview.html).
 
 ## Docker
 
-Run the [published Docker image](https://github.com/wulfnb/lotse/pkgs/container/lotse) through the HTTPS viewer with a persistent profile:
+Run the [published Docker image](https://github.com/wulfnb/wega/pkgs/container/wega) through the HTTPS viewer with a persistent profile:
 
 ```sh
 docker run -d \
-  --name lotse-browser \
-  -p 7443:7443 \
+  --name wega-browser \
+  -p 127.0.0.1:7443:7443 \
   -e BROWSER_USER=servo \
   -e BROWSER_PASSWORD='choose-a-strong-password' \
-  -v lotse-profile:/config \
-  ghcr.io/wulfnb/lotse:latest
+  -v wega-profile:/config \
+  ghcr.io/wulfnb/wega:latest
 ```
 
 Open **https://localhost:7443** and sign in as `servo` with your chosen password.
+
+The viewer is a full remote browser session protected by a password. **Never
+expose port 7443 directly to the internet.** For access from other devices, keep
+it on a private network such as [Tailscale](https://tailscale.com/) or WireGuard,
+or put it behind a reverse proxy you already trust for authentication and TLS.
+The example binds to loopback (`127.0.0.1`), so the viewer is reachable only
+from the Docker host itself.
 
 To build and run from this repository with Docker Compose:
 
@@ -102,7 +121,7 @@ UI; it does not include Firefox, LinuxServer or a full desktop environment.
 Use **Account** in the viewer to change your username/password. After encrypting
 bootstrap values, `python3 scripts/web-credentials.py show` displays the initial
 login locally; changed passwords cannot be recovered. Downloads are
-saved to the host folder set by `SERVO_DOWNLOAD_DIR` (default `./downloads`).
+saved to the host folder set by `WEGA_DOWNLOAD_DIR` (default `./downloads`).
 See [Docker setup and configuration](docs/docker.md) for build requirements,
 authentication, resolution, logs, and the lightweight viewer's limitations.
 
@@ -162,7 +181,7 @@ URL, not its previous JavaScript heap or back/forward stack.
 ## Appearance
 
 Open **… → Appearance** to choose macOS Glass (Auto), Glass Light, Glass Dark,
-Midnight, Paper, or Lotse · Emerald Glass. Changes apply immediately to tabs, the address bar,
+Midnight, Paper, or Wega · Emerald Glass. Changes apply immediately to tabs, the address bar,
 library cards, menus and developer tools, and are saved per profile. Website
 styles and running JavaScript are preserved.
 
@@ -172,14 +191,14 @@ set the native window appearance. The native material follows window activation
 and macOS accessibility settings. Website pixels remain opaque. Other platforms
 use opaque versions of the glass palettes. App-owned PNG exports contain the
 chrome's alpha channel; the macOS compositor's desktop blur is not part of that
-framebuffer export. The default Lotse · Emerald Glass theme matches the selected green glass globe icon.
+framebuffer export. The default Wega · Emerald Glass theme matches the selected green glass globe icon.
 Older profiles keep their stored theme until a new choice is
 made.
 
 Run the native switching/compositing check with an isolated profile:
 
 ```sh
-cargo run --locked --features test-harness -- --theme-test --profile-dir /tmp/servo-theme-test
+cargo run --locked --features test-harness -- --theme-test --profile-dir /tmp/wega-theme-test
 ```
 
 The test exports six theme frames and checks native backdrop state, chrome and
@@ -194,6 +213,13 @@ The panels share the browser theme and dock beneath the inset page. Developer
 output uses a monospace font, Network cells share fixed column edges with a
 flexible waterfall, and the debugger shows unwrapped code, gutter breakpoints
 and an amber paused-line highlight. Brief notices expire automatically.
+
+> **Automation endpoints are unauthenticated.** `--webdriver-port PORT` and
+> `--remote-devtools PORT` open local TCP listeners without any password or
+> token. Any process or user on the same machine (including other containers
+> sharing the network namespace) can then drive the browser, read pages and
+> cookies, and run scripts in your profile. Enable them only for testing, with a
+> separate `--profile-dir`, and never forward these ports.
 
 | Panel | Working controls and data |
 | --- | --- |
@@ -296,8 +322,10 @@ browser profile. Closing the toolbox resumes paused JavaScript.
 
 ## Profile storage
 
-The default profile uses the OS application data directory (`ServoBrowser` under
-`~/Library/Application Support` on macOS). `--profile-dir` overrides this path.
+The default profile uses the OS application data directory:
+`~/Library/Application Support/io.github.wulfnb.Wega` on macOS,
+`~/.local/share/wega` on Linux and `%LOCALAPPDATA%\wulfnb\Wega\data` on Windows.
+`--profile-dir` overrides this path.
 
 `browser.json` stores browser settings, bookmarks, recent URLs, and session URLs;
 `engine/` holds Servo's cookies and website storage. The browser writes its JSON
@@ -318,7 +346,7 @@ cargo check --locked
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
 # Opens a native window and checks the real Servo engine:
-cargo run --locked --features test-harness -- --smoke-test --profile-dir /tmp/servo-browser-smoke
+cargo run --locked --features test-harness -- --smoke-test --profile-dir /tmp/wega-smoke
 # Manual interaction fixture, including links, scrolling, popups and dialogs:
 cargo run --locked -- "file://$PWD/tests/fixtures/interaction.html"
 ```
@@ -336,7 +364,7 @@ and the browser test in another:
 
 ```sh
 python3 tests/network_server.py 8767
-cargo run --locked --features test-harness -- --toolbox-test --profile-dir /tmp/servo-toolbox-test http://127.0.0.1:8767/toolbox.html
+cargo run --locked --features test-harness -- --toolbox-test --profile-dir /tmp/wega-toolbox-test http://127.0.0.1:8767/toolbox.html
 ```
 
 It checks real HTTP POST bodies/headers, 404 responses and redirects, HAR output,
@@ -368,7 +396,7 @@ For rendering diagnostics, export a real page and browser frame with an isolated
 profile:
 
 ```sh
-cargo run --locked -- --profile-dir /tmp/servo-capture --capture /tmp/edudia.png https://edudia.in/
+cargo run --locked -- --profile-dir /tmp/wega-capture --capture /tmp/edudia.png https://edudia.in/
 ```
 
 This exits after loading and writes the page PNG, a `.window.png` browser frame,
@@ -386,12 +414,11 @@ tree, and engine statistics have been removed.
 - `src/input.rs`: native keyboard/modifier/cursor translation.
 - `src/profile.rs`: saved profile, URL resolution, tab ordering and unit tests.
 - `src/theme.rs`, `src/native_theme.rs`: palettes, persisted themes and AppKit vibrancy.
-- `src/theme_test.rs`: native theme switching, alpha and persistence checks.
-- `src/smoke.rs`: desktop integration checks and rendered test frames.
+- `src/harness/`: native test scenarios (smoke, theme, downloads, capabilities, toolbox), built only with `--features test-harness`.
 - `src/network.rs`: bounded network recorder, native event bridge and HAR export.
 - `src/toolbox.rs`, `src/probes.rs`: asynchronous engine commands and page inspection.
 - `src/devtools_ui.rs`: ten native developer panels.
-- `src/toolbox_test.rs`, `tests/network_server.py`: live developer-tool verification.
+- `tests/network_server.py`: fixture server for the live developer-tool scenario.
 - `vendor/servo`: the small builder hook for an in-process developer-event consumer.
 - `vendor/epaint`: a documented glyph-rendering compatibility patch; see `vendor/README.md`.
 
@@ -415,10 +442,30 @@ tools and are never injected into the page. Cookie editing is not yet available.
 
 Performance supports start/stop recordings (60-second limit), animation-frame intervals, resource/mark/measure/paint timings, a selectable waterfall, time-range zoom, summaries, and copying timing JSON. Captures are bounded to 2,000 observer entries and 3,600 animation frames. These are page Performance API timings, not Gecko-style sampled CPU profiles or flame graphs. Navigating away discards the page recording.
 
-Product branding is **Lotse Browser**, with the **Emerald Globe** app icon and the
-default **Lotse · Emerald Glass** palette. Servo remains the rendering engine.
-Existing profile directories, `servo-browser` executable/Compose service names,
-and `SERVO_*` environment settings are retained for compatibility. Existing
-`servo://` internal links continue to work; newly opened internal pages use
-`lotse://`. WebDriver reports `browserName: lotse` and accepts the legacy `servo`
-capability name. The macOS application bundle is `target/Lotse.app`.
+Product branding is **Wega Browser**, with the **Emerald Globe** app icon and the
+default **Wega · Emerald Glass** palette. Servo remains the rendering engine.
+The executable and the Compose service are named `wega`, Compose settings use
+`WEGA_*` variables, and internal pages use `wega://`. WebDriver reports
+`browserName: wega`. The macOS application bundle is `target/Wega.app`.
+
+## Licensing
+
+Wega is licensed under the [Mozilla Public License 2.0](LICENSE). See
+[NOTICE](NOTICE) for attribution, the Servo trademark notice and the warranty and
+liability terms. `vendor/` contains modified copies of the MPL-2.0 Servo 0.7.0
+crate and the MIT/Apache-2.0 epaint 0.37.0 crate; [vendor/README.md](vendor/README.md)
+describes each change.
+
+Every download (macOS app, Linux and Windows archives, Docker image) includes
+`LICENSE`, `NOTICE` (recording the exact source commit it was built from) and
+`THIRD-PARTY-NOTICES.html`, generated with
+[cargo-about](https://github.com/EmbarkStudios/cargo-about) by
+`scripts/third-party-notices.sh`. The macOS app additionally lists the bundled
+LGPL GStreamer/GLib libraries, their Homebrew versions and where to obtain their
+source in `Contents/Resources/MEDIA-LIBRARIES.txt`.
+
+Video and audio decoding on macOS uses Apple's system codecs (VideoToolbox and
+AudioToolbox through GStreamer's `applemedia` plugin). The app does not bundle
+FFmpeg, gst-libav, x264, x265 or other GPL or patent-encumbered codec libraries,
+and the packaging script refuses to produce a bundle that contains them. See
+[docs/licensing.md](docs/licensing.md) for details.

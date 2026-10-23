@@ -50,7 +50,7 @@ test('reader uses text content and toggles without injecting page HTML', () => {
     };
     const context = vm.createContext({document});
     reader.runInContext(context);
-    const panel = ids.get('__servo_reader');
+    const panel = ids.get('__wega_reader');
     assert.equal(panel.children[1].textContent, document.title + '\n\n' + (useArticle ? 'Article text' : 'Body text'));
     assert.equal(panel.children[1].innerHTML, undefined);
     panel.children[0].onclick(); assert.equal(ids.size, 0);

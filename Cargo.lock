@@ -7199,41 +7199,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "servo-browser"
-version = "0.1.0-alpha.1"
-dependencies = [
- "accesskit 0.25.1",
- "arboard",
- "base64 0.22.1",
- "block2 0.6.2",
- "chrono",
- "crossbeam-channel",
- "directories",
- "dpi",
- "egui",
- "egui-winit",
- "egui_glow",
- "euclid",
- "http",
- "image",
- "libc",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "pkcs1",
- "rfd",
- "rustls",
- "serde",
- "serde_json",
- "servo",
- "servo-base",
- "servo-devtools-traits",
- "url",
- "webdriver",
- "winit",
-]
-
-[[package]]
 name = "servo-canvas"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10548,6 +10513,41 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "wega"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "accesskit 0.25.1",
+ "arboard",
+ "base64 0.22.1",
+ "block2 0.6.2",
+ "chrono",
+ "crossbeam-channel",
+ "directories",
+ "dpi",
+ "egui",
+ "egui-winit",
+ "egui_glow",
+ "euclid",
+ "http",
+ "image",
+ "libc",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "pkcs1",
+ "rfd",
+ "rustls",
+ "serde",
+ "serde_json",
+ "servo",
+ "servo-base",
+ "servo-devtools-traits",
+ "url",
+ "webdriver",
+ "winit",
+]
 
 [[package]]
 name = "winapi"

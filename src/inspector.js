@@ -41,4 +41,4 @@ if(chosen) {
     layoutItems:/flex|grid/.test(s.display)?Array.from(chosen.children).slice(0,100).map(e=>({selector:path(e),tag:e.localName})):[],
     ancestors:(()=>{let e=chosen;const list=[];while(e){list.unshift({tag:e.localName,selector:path(e)});e=e.parentElement;}return list;})()};
 }
-return {url:location.href,viewport:{width:innerWidth,height:innerHeight},nodes,selected,truncated:!!node,changes:(globalThis.__servoInspectorChanges||[]).map(c=>c.description)};
+return {url:location.href,viewport:{width:innerWidth,height:innerHeight},nodes,selected,truncated:!!node,changes:(globalThis.__wegaInspectorChanges||[]).map(c=>c.description)};

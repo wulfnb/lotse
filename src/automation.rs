@@ -1,5 +1,8 @@
 //! Loopback W3C WebDriver transport. The HTTP layer is Mozilla's webdriver crate.
-use crate::{browser::Browser, engine::Wake};
+use crate::{
+    browser::{Browser, Tab},
+    engine::Wake,
+};
 use crossbeam_channel::{Receiver, Sender};
 use serde_json::{Value, json};
 use std::{sync::OnceLock, time::Duration};
@@ -30,7 +33,7 @@ impl WebDriverHandler for Handler {
     ) -> WebDriverResult<Response> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let timeout = Duration::from_secs(35);
-        let deadline = servo_browser::deadline::Deadline::new(timeout);
+        let deadline = wega::deadline::Deadline::new(timeout);
         let queued = deadline.clone();
         self.jobs
             .send_timeout(
@@ -95,9 +98,9 @@ impl Browser {
     ) {
         let result = match command {
             Command::Status => {
-                let ready = self.tab().view.load_status() == servo::LoadStatus::Complete;
+                let ready = self.view().load_status() == servo::LoadStatus::Complete;
                 value(
-                    json!({"ready":ready,"message":if ready {"Lotse Browser is ready"} else {"Page is loading"}}),
+                    json!({"ready":ready,"message":if ready {"Wega Browser is ready"} else {"Page is loading"}}),
                 )
             }
             Command::NewSession(params)
@@ -110,7 +113,7 @@ impl Browser {
                         merged.insert(key.clone(), value.clone());
                     }
                     merged.iter().all(|(key, value)| match key.as_str() {
-                        "browserName" => value == "lotse" || value == "servo",
+                        "browserName" => value == "wega",
                         "browserVersion" => value == env!("CARGO_PKG_VERSION") || value == "0.7.0",
                         "platformName" => value == std::env::consts::OS,
                         "pageLoadStrategy" => value == "normal",
@@ -122,12 +125,12 @@ impl Browser {
             {
                 Err(error(
                     ErrorStatus::SessionNotCreated,
-                    "Requested capabilities do not match Lotse Browser",
+                    "Requested capabilities do not match Wega Browser",
                 ))
             }
             Command::NewSession(_) => Ok(Response::NewSession(NewSessionResponse::new(
-                format!("lotse-{}", crate::profile::visit_time()),
-                json!({"browserName":"lotse","browserVersion":env!("CARGO_PKG_VERSION"),"platformName":std::env::consts::OS,"pageLoadStrategy":"normal","setWindowRect":false,"timeouts":{"script":30000,"pageLoad":30000,"implicit":0}}),
+                format!("wega-{}", crate::profile::visit_time()),
+                json!({"browserName":"wega","browserVersion":env!("CARGO_PKG_VERSION"),"platformName":std::env::consts::OS,"pageLoadStrategy":"normal","setWindowRect":false,"timeouts":{"script":30000,"pageLoad":30000,"implicit":0}}),
             ))),
             Command::DeleteSession => {
                 if let Some(pending) = self.automation_navigation.take() {
@@ -137,12 +140,12 @@ impl Browser {
                 }
                 Ok(Response::DeleteSession)
             }
-            Command::GetWindowHandle => value(json!(format!("{:?}", self.tab().view.id()))),
+            Command::GetWindowHandle => value(json!(self.tab().handle())),
             Command::GetWindowHandles => value(json!(
                 self.session()
                     .tabs()
                     .iter()
-                    .map(|t| format!("{:?}", t.view.id()))
+                    .map(Tab::handle)
                     .collect::<Vec<_>>()
             )),
             Command::SwitchToWindow(params) => {
@@ -150,7 +153,7 @@ impl Browser {
                     .session()
                     .tabs()
                     .iter()
-                    .position(|t| format!("{:?}", t.view.id()) == params.handle)
+                    .position(|t| t.handle() == params.handle)
                 {
                     self.select_tab(index);
                     Ok(Response::Void)
@@ -162,8 +165,7 @@ impl Browser {
             Command::GetTitle => {
                 // History restoration can switch the active document before the
                 // embedder's cached title notification arrives. Query the document.
-                self.tab()
-                    .view
+                self.view()
                     .evaluate_javascript("document.title", move |result| {
                         let result = result.map(js).map(value).unwrap_or_else(|error_value| {
                             Err(error(
@@ -183,7 +185,7 @@ impl Browser {
                     .filter(|url| {
                         matches!(
                             url.scheme(),
-                            "http" | "https" | "about" | "servo" | "lotse" | "data" | "file"
+                            "http" | "https" | "about" | "wega" | "data" | "file"
                         )
                     })
                     .and_then(|url| crate::profile::resolve_address(url.as_str()).ok())
@@ -211,7 +213,7 @@ impl Browser {
                     )));
                 }
                 self.automation_navigation = Some(PendingNavigation::new(
-                    self.tab().view.id(),
+                    self.view().id(),
                     Some(url.to_string()),
                     reply,
                     self.tab().url(),
@@ -227,8 +229,8 @@ impl Browser {
                     )));
                     return;
                 }
-                if matches!(command, Command::GoBack) && !self.tab().view.can_go_back()
-                    || matches!(command, Command::GoForward) && !self.tab().view.can_go_forward()
+                if matches!(command, Command::GoBack) && !self.view().can_go_back()
+                    || matches!(command, Command::GoForward) && !self.view().can_go_forward()
                 {
                     let _ = reply.send(Ok(Response::Void));
                     return;
@@ -245,7 +247,7 @@ impl Browser {
                     )));
                 }
                 self.automation_navigation = Some(PendingNavigation::new(
-                    self.tab().view.id(),
+                    self.view().id(),
                     expected,
                     reply,
                     self.tab().url(),
@@ -266,7 +268,7 @@ impl Browser {
                 };
                 if matches!(command, Command::GoBack | Command::GoForward) {
                     self.automation_navigation.as_mut().unwrap().traversal =
-                        self.features.traversals.get(&self.tab().view.id()).cloned();
+                        self.features.traversals.get(&self.view().id()).cloned();
                 }
                 return;
             }
@@ -283,7 +285,7 @@ impl Browser {
                 }
                 let args = serde_json::to_string(&params.args).unwrap_or("[]".into());
                 let source = format!("(function(){{ {} }}).apply(window,{args})", params.script);
-                self.tab().view.evaluate_javascript(source, move |result| {
+                self.view().evaluate_javascript(source, move |result| {
                     let _ = reply.send(match result {
                         Ok(v) => value(js(v)),
                         Err(e) => Err(error(ErrorStatus::JavascriptError, format!("{e:?}"))),
@@ -301,7 +303,7 @@ impl Browser {
                 };
                 self.servo.execute_webdriver_command(
                     servo::webdriver::WebDriverCommandMsg::ScriptCommand(
-                        self.tab().view.id().into(),
+                        self.view().id().into(),
                         servo::webdriver::WebDriverScriptCommand::GetPageSource(sender),
                     ),
                 );
@@ -316,7 +318,7 @@ impl Browser {
                 return;
             }
             Command::TakeScreenshot => {
-                self.tab().view.take_screenshot(None, move |result| {
+                self.view().take_screenshot(None, move |result| {
                     let result = result
                         .map_err(|e| error(ErrorStatus::UnknownError, format!("{e:?}")))
                         .and_then(|image| {
@@ -345,9 +347,9 @@ impl Browser {
 
 pub struct PendingNavigation {
     pub owner: servo::WebViewId,
-    completion: servo_browser::navigation::Completion,
+    completion: wega::navigation::Completion,
     traversal: Option<servo::TraversalId>,
-    deadline: std::time::Instant,
+    pub(crate) deadline: std::time::Instant,
     reply: Sender<WebDriverResult<Response>>,
 }
 impl PendingNavigation {
@@ -359,7 +361,7 @@ impl PendingNavigation {
     ) -> Self {
         Self {
             owner,
-            completion: servo_browser::navigation::Completion::new(expected, initial_url),
+            completion: wega::navigation::Completion::new(expected, initial_url),
             traversal: None,
             deadline: std::time::Instant::now() + Duration::from_secs(30),
             reply,
@@ -398,14 +400,9 @@ impl Browser {
             self.session()
                 .tabs()
                 .iter()
-                .find(|tab| tab.view.id() == pending.owner)
-                .filter(|tab| {
-                    pending.completion.ready(
-                        &tab.url(),
-                        tab.view.load_status() == servo::LoadStatus::Complete,
-                    )
-                })
-                .map(|tab| tab.view.id())
+                .find(|tab| tab.id() == Some(pending.owner))
+                .filter(|tab| pending.completion.ready(&tab.url(), !tab.loading()))
+                .and_then(Tab::id)
         });
         if let Some(view) = ready {
             self.automation_finish_navigation(view);

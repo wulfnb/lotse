@@ -26,15 +26,15 @@ class CredentialToolTests(unittest.TestCase):
     def test_rewrite_is_private_and_does_not_print_secrets(self):
         with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as output:
             root = Path(directory)
-            (root / '.env').write_text("OTHER=keep\nSERVO_WEB_USER=old\n")
-            values = {'SERVO_WEB_USER': 'enc:v1:user', 'SERVO_WEB_PASSWORD': 'enc:v1:secret'}
+            (root / '.env').write_text("OTHER=keep\nWEGA_WEB_USER=old\n")
+            values = {'WEGA_WEB_USER': 'enc:v1:user', 'WEGA_WEB_PASSWORD': 'enc:v1:secret'}
             with patch.object(credentials.subprocess, 'check_output', return_value=json.dumps(values)) as run:
                 credentials.main(['encrypt-env'], root)
                 self.assertEqual(run.call_args.kwargs['cwd'], root)
             content = (root / '.env').read_text()
             self.assertIn('OTHER=keep', content)
-            self.assertIn("SERVO_WEB_USER='enc:v1:user'", content)
-            self.assertIn("SERVO_WEB_PASSWORD='enc:v1:secret'", content)
+            self.assertIn("WEGA_WEB_USER='enc:v1:user'", content)
+            self.assertIn("WEGA_WEB_PASSWORD='enc:v1:secret'", content)
             self.assertNotIn('secret', output.getvalue())
             self.assertEqual((root / '.env').stat().st_mode & 0o777, 0o600)
         with patch.object(credentials.subprocess, 'check_output', return_value='explicit bootstrap output'), contextlib.redirect_stdout(io.StringIO()) as output:
@@ -50,8 +50,8 @@ class MediaPackagerTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         self.sdk = self.root / 'sdk/lib/gstreamer-1.0'
         self.sdk.mkdir(parents=True)
-        self.app = self.root / 'Lotse.app'
-        self.binary = self.app / 'Contents/MacOS/servo-browser'
+        self.app = self.root / 'Wega.app'
+        self.binary = self.app / 'Contents/MacOS/wega'
         self.binary.parent.mkdir(parents=True)
         self.binary.write_bytes(b'original executable')
         lists = self.root / 'vendor/servo/gstreamer_plugin_lists'
@@ -62,6 +62,7 @@ class MediaPackagerTests(unittest.TestCase):
             (self.sdk / name).write_bytes(b'source ' + name.encode())
         (self.sdk.parent / 'libcommon.dylib').write_bytes(b'common source')
         self.dependencies = {}
+        self.formulae = {}
         self.calls = []
 
     def run_bundle(self, override=True):
@@ -69,6 +70,9 @@ class MediaPackagerTests(unittest.TestCase):
             if command[0] == 'pkg-config':
                 self.assertFalse(override)
                 return str(self.sdk)
+            if command[0] == 'brew':
+                self.assertEqual(command[:3], ['brew', 'info', '--json=v2'])
+                return json.dumps({'formulae': [self.formulae[name] for name in command[3:]]})
             self.assertEqual(command[0], 'otool')
             original = command[-1]
             deps = self.dependencies.get(original, [])
@@ -93,6 +97,56 @@ class MediaPackagerTests(unittest.TestCase):
         for command in self.calls:
             self.assertTrue(Path(command[-1]).is_relative_to(self.app))
         self.run_bundle()  # Override does not invoke pkg-config; existing copied files are safely replaced.
+
+    def test_homebrew_libraries_get_license_and_source_notices(self):
+        cellar = self.root / 'Cellar'
+        glib = cellar / 'glib/2.90.1/lib/libglib-2.0.0.dylib'
+        intl = cellar / 'gettext/1.0/lib/libintl.8.dylib'
+        for library in [glib, intl]:
+            library.parent.mkdir(parents=True)
+            library.write_bytes(b'homebrew ' + library.name.encode())
+        self.formulae['glib'] = {'name': 'glib', 'license': 'LGPL-2.1-or-later', 'homepage': 'https://docs.gtk.org/glib/', 'ruby_source_path': 'Formula/g/glib.rb', 'urls': {'stable': {'url': 'https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz'}}}
+        self.formulae['gettext'] = {'name': 'gettext', 'license': None, 'urls': {}}
+        self.dependencies[str(self.sdk / 'libalpha.dylib')] = [str(glib), str(intl)]
+        self.run_bundle()
+        manifest = json.loads((self.app / 'Contents/Resources/media-libraries.json').read_text())
+        self.assertIn({'file': glib.name, 'source': str(glib), 'formula': 'glib', 'version': '2.90.1'}, manifest)
+        notices = (self.app / 'Contents/Resources/MEDIA-LIBRARIES.txt').read_text()
+        self.assertIn('Homebrew formula: glib 2.90.1', notices)
+        self.assertIn('License: LGPL-2.1-or-later', notices)
+        self.assertIn('https://github.com/Homebrew/homebrew-core/blob/HEAD/Formula/g/glib.rb', notices)
+        self.assertIn('glib-2.90.1.tar.xz', notices)
+        self.assertIn('Homebrew formula: gettext 1.0\n  License: see upstream project', notices)
+        self.assertIn('Copied from: ' + str(self.sdk / 'libalpha.dylib'), notices)
+        self.assertIn('Written offer', notices)
+        self.assertIn('https://github.com/wulfnb/wega/issues', notices)
+
+    def test_gpl_and_patent_encumbered_codecs_are_refused_before_copying(self):
+        for name in ['libx264.164.dylib', 'libx265.215.dylib', 'libavcodec.62.dylib', 'libavformat.62.dylib', 'libswscale.9.dylib', 'libswresample.6.dylib', 'libpostproc.59.dylib', 'libfaac.0.dylib', 'libgstlibav.dylib']:
+            codec = self.root / 'codecs' / name
+            codec.parent.mkdir(exist_ok=True)
+            codec.write_bytes(b'codec')
+            self.dependencies[str(self.sdk / 'libalpha.dylib')] = [str(codec)]
+            self.calls.clear()
+            with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, 'Refusing to bundle GPL/patent-encumbered codec library ' + name.replace('.', r'\.')):
+                self.run_bundle()
+            self.assertFalse((self.app / 'Contents/MacOS/lib' / name).exists())
+            self.assertFalse(any(command[0] == 'codesign' for command in self.calls))
+        # A listed gst-libav plugin is refused even before its dependencies are read.
+        self.dependencies.clear()
+        (self.sdk / 'libgstlibav.dylib').write_bytes(b'plugin')
+        (self.root / 'vendor/servo/gstreamer_plugin_lists/macos.rs.in').write_text('["beta", "gstlibav"]\n')
+        with self.assertRaisesRegex(RuntimeError, 'libgstlibav'):
+            self.run_bundle()
+
+    def test_shipped_plugin_lists_use_system_codecs_without_gst_libav(self):
+        plugins = {}
+        for name in ['common', 'macos']:
+            content = (ROOT / f'vendor/servo/gstreamer_plugin_lists/{name}.rs.in').read_text()
+            plugins[name] = media.ast.literal_eval(media.re.sub(r'//[^\n]*', '', content))
+        self.assertNotIn('gstlibav', plugins['common'] + plugins['macos'])
+        self.assertIn('gstapplemedia', plugins['macos'])
+        self.assertFalse(any(media.FORBIDDEN.match(f'lib{plugin}.dylib') for plugin in plugins['common'] + plugins['macos']))
 
     def test_missing_collision_and_unresolved_dependencies_fail_before_signing(self):
         other = self.root / 'other/libalpha.dylib'

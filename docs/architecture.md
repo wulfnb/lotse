@@ -1,6 +1,6 @@
-# Lotse architecture
+# Wega architecture
 
-Lotse is a modular desktop application. Its core compiles without Servo, egui,
+Wega is a modular desktop application. Its core compiles without Servo, egui,
 GStreamer or a window server:
 
 ```sh

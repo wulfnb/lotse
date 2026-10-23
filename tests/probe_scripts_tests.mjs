@@ -51,7 +51,7 @@ function inspectorFixture({selected=true, fallbackNames=false, large=false, many
   const sheet=cssRules=>({disabled:false,media:{length:0},cssRules});
   const sheets=[{disabled:true}, {disabled:false,media:{length:1,mediaText:'skip'}}, sheet([rule('.match'),rule('.other'),rule('invalid['),mediaSkip,supportsSkip,nested,inaccessibleImport,{styleSheet:{cssRules:[rule('.match')]}}]), {disabled:false,media:{length:0},get cssRules(){throw Error('CORS');}}, sheet(Array.from({length:110},()=>rule('.match'))), sheet(Array.from({length:3005},()=>({})))];
   let index=0;
-  const context=vm.createContext({document:{documentElement:html,querySelector:()=>selected?chosen:null,querySelectorAll:selector=>selector==='#selected'?[chosen]:[],styleSheets:sheets,createTreeWalker:()=>({nextNode:()=>many?chosen:[chosen,child][index++]})},CSS:{escape:value=>value,supports:()=>false},NodeFilter:{SHOW_ELEMENT:1},getComputedStyle:()=>style,matchMedia:query=>({matches:query!=='skip'}),location:{href:'https://example.com'},innerWidth:1000,innerHeight:700,__servoInspectorChanges:[{description:'changed'}]});
+  const context=vm.createContext({document:{documentElement:html,querySelector:()=>selected?chosen:null,querySelectorAll:selector=>selector==='#selected'?[chosen]:[],styleSheets:sheets,createTreeWalker:()=>({nextNode:()=>many?chosen:[chosen,child][index++]})},CSS:{escape:value=>value,supports:()=>false},NodeFilter:{SHOW_ELEMENT:1},getComputedStyle:()=>style,matchMedia:query=>({matches:query!=='skip'}),location:{href:'https://example.com'},innerWidth:1000,innerHeight:700,__wegaInspectorChanges:[{description:'changed'}]});
   return inspect.runInContext(context)('main');
 }
 

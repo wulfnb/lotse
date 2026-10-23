@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
-"""Local authentication gateway. Only nginx's HTTPS listener is public."""
+"""Local authentication gateway. Only nginx's HTTPS listener is public.
+
+The gateway and its WebSocket bridge listen on Unix sockets, never on TCP
+loopback: pages loaded by the browser in this container can open loopback TCP
+connections, but they cannot open Unix sockets.
+"""
 import base64
 import hashlib
 import hmac
 from http.cookies import CookieError, SimpleCookie
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import signal
+import socketserver
 import subprocess
 import sys
 import threading
@@ -20,19 +27,31 @@ from urllib.parse import unquote
 from cryptography.fernet import Fernet
 
 DIRECTORY = Path(os.environ.get('BROWSER_AUTH_DIR', '/config/auth'))
+UPLOADS = Path(os.environ.get('BROWSER_UPLOAD_DIR', '/config/uploads'))
+AUTH_SOCKET = os.environ.get('BROWSER_AUTH_SOCKET', '/run/wega/auth/auth.sock')
+WEBSOCKET_SOCKET = os.environ.get('BROWSER_WEBSOCKET_SOCKET', '/run/wega/auth/websocket.sock')
+VNC_SOCKET = os.environ.get('BROWSER_VNC_SOCKET', '/run/wega/vnc/rfb.sock')
 LOCK = threading.RLock()
+# scrypt(N=2^17, r=8) needs 128 MiB per hash. Hashing runs outside LOCK, so
+# bound concurrency to keep parallel login attempts within the memory limit.
+HASHING = threading.BoundedSemaphore(2)
+UPLOAD_LOCK = threading.Lock()
 SESSIONS = {}
 ATTEMPTS = {}
+ATTEMPT_LIMIT = 10
+ATTEMPT_TABLE = 4096
 WEBSOCKET = None
-COOKIE = '__Host-servo_session'
+COOKIE = '__Host-wega_session'
 
 
-def atomic(path, data):
+def atomic(path, data, mode=0o600):
     # A predictable O_TRUNC temporary path follows attacker-created symlinks.
     # mkstemp creates a private, exclusive inode in the destination directory.
     fd, name = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
     temporary = Path(name)
     try:
+        if mode != 0o600:
+            os.fchmod(fd, mode)
         with os.fdopen(fd, 'wb') as stream:
             stream.write(data)
             stream.flush()
@@ -70,14 +89,23 @@ def validate(username, password):
 
 
 def digest(password, salt):
-    return hashlib.scrypt(password.encode(), salt=salt, n=131072, r=8, p=1, maxmem=256 * 1024 * 1024).hex()
+    with HASHING:
+        return hashlib.scrypt(password.encode(), salt=salt, n=131072, r=8, p=1, maxmem=256 * 1024 * 1024).hex()
+
+
+def prepare(username, password):
+    """Validate and hash a new account record; slow, so call without LOCK."""
+    validate(username, password)
+    salt = secrets.token_bytes(16)
+    return {'username': username, 'salt': salt.hex(), 'password_hash': digest(password, salt)}
+
+
+def store(record):
+    atomic(DIRECTORY / 'account.enc', cipher().encrypt(json.dumps(record).encode()))
 
 
 def save(username, password):
-    validate(username, password)
-    salt = secrets.token_bytes(16)
-    record = {'username': username, 'salt': salt.hex(), 'password_hash': digest(password, salt)}
-    atomic(DIRECTORY / 'account.enc', cipher().encrypt(json.dumps(record).encode()))
+    store(prepare(username, password))
 
 
 def account():
@@ -162,13 +190,20 @@ def stop_websocket():
 def restart_websocket():
     global WEBSOCKET
     stop_websocket()
-    WEBSOCKET = subprocess.Popen(['/usr/bin/websockify', '127.0.0.1:' + os.environ.get('BROWSER_WEBSOCKET_PORT', '6080'), '127.0.0.1:5900'],
+    # Unix sockets only: nginx (after auth_request) is the sole client, and
+    # x11vnc listens on a Unix socket without any TCP port.
+    WEBSOCKET = subprocess.Popen(['/usr/bin/websockify', '--unix-listen=' + WEBSOCKET_SOCKET, '--unix-listen-mode=660',
+                                  '--unix-target=' + VNC_SOCKET],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def watch_websocket():
+    pruned = time.monotonic()
     while True:
         time.sleep(1)
+        if time.monotonic() - pruned >= 3600:
+            pruned = time.monotonic()
+            prune_uploads()
         with LOCK:
             expired = [token for token, value in SESSIONS.items() if value['expires'] <= time.monotonic()]
             for token in expired:
@@ -183,21 +218,58 @@ UPLOAD_LIMIT = 32 * 1024 * 1024
 UPLOAD_QUOTA = 256 * 1024 * 1024
 
 
+def retention_days():
+    try:
+        return max(0, int(os.environ.get('WEGA_UPLOAD_RETENTION_DAYS', '7')))
+    except ValueError:
+        return 7
+
+
+def prune_uploads(now=None):
+    """Delete upload folders older than WEGA_UPLOAD_RETENTION_DAYS (0 keeps all)."""
+    days = retention_days()
+    if not days or not UPLOADS.is_dir():
+        return 0
+    cutoff = (time.time() if now is None else now) - days * 86400
+    removed = 0
+    for entry in UPLOADS.iterdir():
+        try:
+            if entry.is_symlink() or not entry.is_dir() or entry.lstat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(entry)
+            removed += 1
+        except OSError:
+            pass  # Best effort; a later pass retries.
+    return removed
+
+
 def save_upload(encoded_name, body):
     name = unquote(encoded_name, errors='strict')
     if not name or len(name.encode()) > 200 or name in ('.', '..') or any(c in name for c in '/\\:') or any(ord(c) < 32 for c in name):
         raise ValueError('Choose a file with a valid filename (no paths).')
     if len(body) > UPLOAD_LIMIT:
         raise ValueError('Files must be 32 MiB or smaller.')
-    folder = DIRECTORY / 'uploads'
-    folder.mkdir(mode=0o700, exist_ok=True)
+    # Outside the secret auth directory: the browser UID (group) must read it
+    # to pass the file to a website's file chooser. Entrypoint makes the folder
+    # setgid with the browser group, so new entries inherit that group.
+    folder = UPLOADS
+    folder.mkdir(mode=0o750, exist_ok=True)
     files = [p for p in folder.glob('*/*') if p.is_file()]
     if len(files) >= 100 or sum(p.stat().st_size for p in files) + len(body) > UPLOAD_QUOTA:
         raise ValueError('Upload storage is full. Remove unused files from the profile upload folder.')
-    private = Path(tempfile.mkdtemp(prefix='file-', dir=folder))
+    while True:
+        # Not mkdtemp + chmod: chmod by a non-member of the folder's group
+        # clears the inherited setgid bit, and new files would lose the
+        # browser group. mkdir keeps it; the 0750 mode is limited by umask.
+        private = folder / ('file-' + secrets.token_hex(8))
+        try:
+            private.mkdir(mode=0o750)
+            break
+        except FileExistsError:
+            continue
     destination = private / name
     try:
-        atomic(destination, body)
+        atomic(destination, body, 0o640)
     except BaseException:
         private.rmdir()
         raise
@@ -240,21 +312,24 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(401, {'error': 'Please sign in.'})
                 if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), active['csrf'].encode()):
                     return self.reply(403, {'error': 'Reopen Upload and try again.'})
-                if self.headers.get('Content-Type') != 'application/octet-stream':
-                    return self.reply(415, {'error': 'A binary file is required.'})
-                try:
-                    length = int(self.headers.get('Content-Length', '-1'))
-                    if not 0 <= length <= UPLOAD_LIMIT:
-                        return self.reply(413, {'error': 'Files must be 32 MiB or smaller.'})
-                    body = self.rfile.read(length)
-                    if len(body) != length:
-                        return self.reply(400, {'error': 'Upload was incomplete. Please try again.'})
+            # The body is read without LOCK: a slow upload must not stall
+            # /verify for every other viewer request.
+            if self.headers.get('Content-Type') != 'application/octet-stream':
+                return self.reply(415, {'error': 'A binary file is required.'})
+            try:
+                length = int(self.headers.get('Content-Length', '-1'))
+                if not 0 <= length <= UPLOAD_LIMIT:
+                    return self.reply(413, {'error': 'Files must be 32 MiB or smaller.'})
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    return self.reply(400, {'error': 'Upload was incomplete. Please try again.'})
+                with UPLOAD_LOCK:  # Serialise quota checks and publication.
                     path = save_upload(self.headers.get('X-Upload-Name', ''), body)
-                    return self.reply(201, {'path': str(path), 'name': path.name})
-                except (ValueError, UnicodeError) as error:
-                    return self.reply(400, {'error': str(error)})
-                except OSError:
-                    return self.reply(500, {'error': 'Could not save the file. Check available profile storage.'})
+                return self.reply(201, {'path': str(path), 'name': path.name})
+            except (ValueError, UnicodeError) as error:
+                return self.reply(400, {'error': str(error)})
+            except OSError:
+                return self.reply(500, {'error': 'Could not save the file. Check available profile storage.'})
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.reply(415, {'error': 'JSON required.'})
         try:
@@ -266,50 +341,104 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError()
         except (ValueError, UnicodeError):
             return self.reply(400, {'error': 'Invalid request.'})
+        # nginx sets X-Real-IP from $remote_addr (after optional trusted-proxy
+        # real_ip processing). Only nginx can reach the gateway's Unix socket.
+        address = self.headers.get('X-Real-IP') or 'local'
         with LOCK:
-            address = self.headers.get('X-Real-IP') or (self.client_address[0] if hasattr(self, 'client_address') else '127.0.0.1')
-            now = time.monotonic()
-            for key in list(ATTEMPTS):
-                if now - ATTEMPTS[key][0] > 60:
-                    del ATTEMPTS[key]
-            if len(ATTEMPTS) > 4096:
-                return self.reply(429, {'error': 'Please try again later.'})
-            if ATTEMPTS.get(address, (now, 0))[1] >= 10:
+            if not charge_attempt(address):
                 return self.reply(429, {'error': 'Too many attempts. Wait one minute.'})
             if self.path == '/auth/login':
-                if not matches(account(), data.get('username'), data.get('password')):
-                    first, count = ATTEMPTS.get(address, (now, 0))
-                    ATTEMPTS[address] = (first, count + 1)
-                    return self.reply(401, {'error': 'Incorrect username or password.'})
+                record = account()
+            else:
+                token, active = session(self)
+                if not active:
+                    refund_attempt(address)
+                    return self.reply(401, {'error': 'Please sign in.'})
+                if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), active['csrf'].encode()):
+                    refund_attempt(address)
+                    return self.reply(403, {'error': 'Please reopen account settings and try again.'})
+                if self.path == '/auth/logout':
+                    refund_attempt(address)
+                    SESSIONS.clear()
+                    restart_websocket()
+                    return self.reply(200, {'ok': True}, '')
+                if self.path != '/auth/account':
+                    refund_attempt(address)
+                    return self.reply(404)
+                record = account()
+        # scrypt runs without LOCK so one slow hash never blocks /verify and
+        # every other viewer request. The attempt was charged up front, so
+        # parallel guesses cannot exceed the per-address limit.
+        if self.path == '/auth/login':
+            if not matches(record, data.get('username'), data.get('password')):
+                return self.reply(401, {'error': 'Incorrect username or password.'})
+            with LOCK:
                 ATTEMPTS.pop(address, None)
                 return self.reply(200, {'ok': True}, new_session())
-            _, active = session(self)
-            if not active:
+        if not matches(record, record['username'], data.get('current_password')):
+            return self.reply(403, {'error': 'Current password is incorrect.'})
+        refund_attempt(address)
+        try:
+            validate(data.get('username'), data.get('password'))
+            if data['password'] != data.get('confirm_password'):
+                raise ValueError('New passwords do not match.')
+            replacement = prepare(data['username'], data['password'])
+        except ValueError as error:
+            return self.reply(400, {'error': str(error)})
+        with LOCK:
+            if token not in SESSIONS:
                 return self.reply(401, {'error': 'Please sign in.'})
-            if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), active['csrf'].encode()):
-                return self.reply(403, {'error': 'Please reopen account settings and try again.'})
-            if self.path == '/auth/logout':
-                SESSIONS.clear()
-                restart_websocket()
-                return self.reply(200, {'ok': True}, '')
-            if self.path != '/auth/account':
-                return self.reply(404)
-            record = account()
-            if not matches(record, record['username'], data.get('current_password')):
-                first, count = ATTEMPTS.get(address, (now, 0))
-                ATTEMPTS[address] = (first, count + 1)
-                return self.reply(403, {'error': 'Current password is incorrect.'})
-            try:
-                validate(data.get('username'), data.get('password'))
-                if data['password'] != data.get('confirm_password'):
-                    raise ValueError('New passwords do not match.')
-                save(data['username'], data['password'])
-            except ValueError as error:
-                return self.reply(400, {'error': str(error)})
+            store(replacement)
             SESSIONS.clear()
             ATTEMPTS.pop(address, None)
             restart_websocket()  # Close existing control connections, not only HTTP sessions.
             self.reply(200, {'ok': True}, new_session())
+
+
+def charge_attempt(address):
+    """Reserve one authentication attempt for address; call with LOCK held."""
+    now = time.monotonic()
+    for key in list(ATTEMPTS):
+        if now - ATTEMPTS[key][0] > 60:
+            del ATTEMPTS[key]
+    first, count = ATTEMPTS.get(address, (now, 0))
+    if count >= ATTEMPT_LIMIT:
+        return False
+    if address not in ATTEMPTS:
+        # Evict the oldest windows instead of refusing every client when many
+        # distinct addresses are tracked.
+        while len(ATTEMPTS) >= ATTEMPT_TABLE:
+            del ATTEMPTS[next(iter(ATTEMPTS))]
+    ATTEMPTS[address] = (first, count + 1)
+    return True
+
+
+def refund_attempt(address):
+    with LOCK:
+        if address in ATTEMPTS:
+            first, count = ATTEMPTS[address]
+            if count <= 1:
+                del ATTEMPTS[address]
+            else:
+                ATTEMPTS[address] = (first, count - 1)
+
+
+class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+    block_on_close = False
+
+    def __init__(self, path, handler):
+        Path(path).unlink(missing_ok=True)
+        super().__init__(path, handler)
+        os.chmod(path, 0o660)  # nginx (browser group via wega-ipc) connects.
+
+    def get_request(self):
+        request, _ = self.socket.accept()
+        return request, ('local', 0)
+
+    def server_close(self):
+        super().server_close()
+        Path(self.server_address).unlink(missing_ok=True)
 
 
 if __name__ == '__main__':
@@ -330,16 +459,19 @@ if __name__ == '__main__':
         elif len(sys.argv) > 1 and sys.argv[1] == 'encrypt-current-bootstrap':
             username, password = bootstrap()
             print(json.dumps({key: 'enc:v1:' + cipher().encrypt(value.encode()).decode()
-                              for key, value in {'SERVO_WEB_USER': username, 'SERVO_WEB_PASSWORD': password}.items()}))
+                              for key, value in {'WEGA_WEB_USER': username, 'WEGA_WEB_PASSWORD': password}.items()}))
         else:
             initialize()
+            prune_uploads()
             restart_websocket()
             threading.Thread(target=watch_websocket, daemon=True).start()
             signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
             signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+            server = UnixHTTPServer(AUTH_SOCKET, Handler)
             try:
-                ThreadingHTTPServer(('127.0.0.1', int(os.environ.get('BROWSER_AUTH_PORT', '6081'))), Handler).serve_forever()
+                server.serve_forever()
             finally:
+                server.server_close()
                 stop_websocket()
     except (ValueError, OSError) as error:
         sys.exit('Web authentication could not start: ' + str(error))

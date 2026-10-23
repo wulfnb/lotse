@@ -65,7 +65,7 @@ including Windows; it does not require a POSIX shell on Windows. Use
 measurement. Required desktop configurations still need their own native runs.
 
 Reports are in `target/coverage/desktop/`. A local `objects/` snapshot preserves
-the instrumented executable when a normal build replaces `target/debug/servo-browser`.
+the instrumented executable when a normal build replaces `target/debug/wega`.
 It is intentionally excluded from CI artifact uploads because of its size. HTML,
 JSON and LCOV remain standalone review artifacts. Darwin continuous profiles retain
 counters from terminated browser processes; see the [Rust instrumentation docs](https://doc.rust-lang.org/rustc/instrument-coverage.html)
@@ -83,7 +83,7 @@ For optional, informational Rust core branch measurement:
 
 ```sh
 rustup component add llvm-tools-preview --toolchain nightly
-RUSTUP_TOOLCHAIN=nightly LOTSE_COVERAGE_BRANCH=1 python3 scripts/desktop-coverage.py --core-only --output target/coverage/core-branches
+RUSTUP_TOOLCHAIN=nightly WEGA_COVERAGE_BRANCH=1 python3 scripts/desktop-coverage.py --core-only --output target/coverage/core-branches
 ```
 
 For all seven standalone JavaScript files (Node 26, no npm dependencies):
@@ -106,9 +106,9 @@ For production shell scripts, run the isolated Linux contract suite with actual
 kcov counters (build the base application image first):
 
 ```sh
-docker build -f docker/coverage.Dockerfile --build-arg LOTSE_BASE=servo-browser:local -t lotse-coverage-tools:local .
+docker build -f docker/coverage.Dockerfile --build-arg WEGA_BASE=wega:local -t wega-coverage-tools:local .
 mkdir -p target/coverage/shell
-docker run --rm -v "$PWD:/source:ro" -v "$PWD/target/coverage/shell:/output" lotse-coverage-tools:local python3 /source/tests/shell_contracts.py --source /source --output /output
+docker run --rm -v "$PWD:/source:ro" -v "$PWD/target/coverage/shell:/output" wega-coverage-tools:local python3 /source/tests/shell_contracts.py --source /source --output /output
 ```
 
 These contracts execute entrypoint/startup and packaging scripts in a disposable
@@ -156,8 +156,8 @@ Use the dedicated Compose file, which has no normal profile/download mounts:
 
 ```sh
 export COMPOSE_FILE=compose.quality.yaml
-export COMPOSE_PROJECT_NAME=lotse-quality
-export LOTSE_TEST_PASSWORD="$(openssl rand -hex 24)"
+export COMPOSE_PROJECT_NAME=wega-quality
+export WEGA_TEST_PASSWORD="$(openssl rand -hex 24)"
 docker compose build
 docker compose up -d --wait
 sh scripts/docker-account-test.sh

@@ -403,7 +403,7 @@ impl crate::browser::Browser {
         if !self.chrome.show_console {
             return false;
         }
-        let owner = crate::network::owner(self.tab().view.id());
+        let owner = crate::network::owner(self.view().id());
         let Some(debug) = self.tools.debug.get(&owner) else {
             return false;
         };

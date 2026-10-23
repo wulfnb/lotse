@@ -9,7 +9,7 @@ use winit::{
     window::Window,
 };
 
-pub use servo_browser::model::Dock;
+pub use wega::model::Dock;
 pub struct ToolWindow {
     pub window: Window,
     context: WindowRenderingContext,
@@ -32,9 +32,13 @@ impl Browser {
             for page in self.tools.pages.values_mut() {
                 page.inspector.picking = false;
             }
-            for tab in self.session().tabs() {
-                tab.view
-                    .evaluate_javascript("globalThis.__servoPickerCancel?.()".to_owned(), |_| {});
+            for view in self
+                .session()
+                .tabs()
+                .iter()
+                .filter_map(crate::browser::Tab::view)
+            {
+                view.evaluate_javascript("globalThis.__wegaPickerCancel?.()".to_owned(), |_| {});
             }
         }
         active
@@ -42,9 +46,13 @@ impl Browser {
     pub fn close_developer_tools(&mut self) {
         self.chrome.show_console = false;
         self.tools.resume_all();
-        for tab in self.session().tabs() {
-            tab.view
-                .evaluate_javascript("globalThis.__servoPickerCancel?.()".to_owned(), |_| {});
+        for view in self
+            .session()
+            .tabs()
+            .iter()
+            .filter_map(crate::browser::Tab::view)
+        {
+            view.evaluate_javascript("globalThis.__wegaPickerCancel?.()".to_owned(), |_| {});
         }
     }
     pub fn toggle_developer_tools(&mut self) {
@@ -107,7 +115,7 @@ impl Browser {
                 }
                 Err(error) => {
                     self.tools.notice = Some(format!("Cannot open developer window: {error}"));
-                    self.apply(servo_browser::application::Command::Dock(Dock::Bottom));
+                    self.apply(wega::application::Command::Dock(Dock::Bottom));
                 }
             }
             let _ = self.context.make_current();
@@ -212,7 +220,7 @@ impl Browser {
                         .clear(window.window.inner_size().into(), color);
                     window.gui.paint(&window.window);
                     #[cfg(feature = "test-harness")]
-                    if let Some(test) = &self.toolbox_test
+                    if let Some(test) = &self.harness.toolbox_test
                         && let Some(name) = &test.capture
                         && name.starts_with("detached-")
                     {

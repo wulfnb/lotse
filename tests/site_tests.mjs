@@ -19,7 +19,7 @@ test('website Copy announces success only after the clipboard operation resolves
   const f=fixture({writeText:text=>{copied=text;return new Promise(resolve=>{finish=resolve;});}});
   const pending=f.copy();assert.equal(f.button.textContent,'Copy');assert.equal(f.notice.textContent,'');
   finish();await pending;
-  assert.equal(f.button.textContent,'Copied!');assert.match(copied,/BROWSER_PASSWORD=/);assert.match(copied,/ghcr.io\/wulfnb\/lotse:latest$/);
+  assert.equal(f.button.textContent,'Copied!');assert.match(copied,/BROWSER_PASSWORD=/);assert.match(copied,/ghcr.io\/wulfnb\/wega:latest$/);
   f.menuClick();assert.equal(f.state().closed,true);
 });
 for(const [name,clipboard] of [['unavailable',undefined],['denied',{writeText:async()=>{throw Error('denied');}}]]){

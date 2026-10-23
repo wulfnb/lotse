@@ -3,23 +3,17 @@ mod automation;
 mod brand;
 mod browser;
 mod capabilities;
-#[cfg(feature = "test-harness")]
-mod capabilities_test;
 mod capabilities_ui;
 mod capture;
 mod compat;
 mod console_model;
 mod console_ui;
 mod cookie_inspector;
-#[cfg(feature = "test-harness")]
-mod coverage_ui_tests;
 mod debug_driver;
 mod debug_model;
 mod debugger_ui;
 mod devtools_ui;
-#[cfg(feature = "test-harness")]
-mod download_test;
-use servo_browser::downloads;
+use wega::downloads;
 mod downloads_ui;
 mod engine;
 mod input;
@@ -32,18 +26,14 @@ mod network;
 mod network_controls;
 mod performance_ui;
 mod probes;
-use servo_browser::profile;
+use wega::profile;
 mod accessibility;
+#[cfg(feature = "test-harness")]
+mod harness;
 mod resources;
-#[cfg(feature = "test-harness")]
-mod smoke;
 mod theme;
-#[cfg(feature = "test-harness")]
-mod theme_test;
 mod tool_window;
 mod toolbox;
-#[cfg(feature = "test-harness")]
-mod toolbox_test;
 mod ui;
 mod ux;
 
@@ -57,10 +47,7 @@ fn browser_icon() -> Option<winit::window::Icon> {
 
 use browser::Browser;
 use engine::Wake;
-use std::{
-    error::Error,
-    time::{Duration, Instant},
-};
+use std::error::Error;
 use winit::{
     application::ApplicationHandler,
     event::WindowEvent,
@@ -68,7 +55,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use servo_browser::options::Options;
+use wega::options::Options;
 
 struct App {
     options: Options,
@@ -167,15 +154,11 @@ impl ApplicationHandler<Wake> for App {
             browser.sync_tool_window(event_loop);
             browser.tick();
             browser.check_background_tasks(event_loop);
-            let delay = if browser.animating() || browser.smoke_testing() || browser.tools.pending()
-            {
-                16
-            } else {
-                250
-            };
-            event_loop.set_control_flow(ControlFlow::WaitUntil(
-                Instant::now() + Duration::from_millis(delay),
-            ));
+            // Sleep until the next real deadline; an idle window wakes only for events.
+            event_loop.set_control_flow(match browser.next_wakeup() {
+                Some(when) => ControlFlow::WaitUntil(when),
+                None => ControlFlow::Wait,
+            });
         }
     }
 
@@ -200,7 +183,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse_from(std::env::args().skip(1)).map_err(std::io::Error::other)?;
     if options.help {
         println!(
-            "Lotse Browser\nUsage: servo-browser [--profile-dir PATH] [--capture FILE.png] [URL]\n  --remote-devtools PORT · --webdriver-port PORT\n  --multiprocess (requires --features multiprocess)\n  Native tests require --features test-harness and an isolated --profile-dir.\n  Test modes: --smoke-test, --download-test, --toolbox-test, --theme-test, --capabilities-test"
+            "Wega Browser\nUsage: wega [--profile-dir PATH] [--capture FILE.png] [URL]\n  --remote-devtools PORT · --webdriver-port PORT\n    Both open UNAUTHENTICATED endpoints on 127.0.0.1. Any local process or user\n    can then read and control open pages (cookies, sessions, input). Use them\n    only on a trusted machine and with a disposable --profile-dir.\n  --multiprocess (requires --features multiprocess)\n  Native tests require --features test-harness and an isolated --profile-dir.\n  Test modes: --smoke-test, --download-test, --toolbox-test, --theme-test, --capabilities-test"
         );
         return Ok(());
     }

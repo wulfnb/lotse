@@ -22,11 +22,100 @@ pub struct Bookmark {
     pub visited_at: u64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SavedFavicon {
-    pub width: usize,
-    pub height: usize,
-    pub rgba: Vec<u8>,
+/// Largest accepted encoded favicon. 64×64 RGBA is 16 KiB uncompressed.
+pub const MAX_FAVICON_BYTES: usize = 32 * 1024;
+
+/// A persisted favicon. New profiles store PNG bytes (base64 in JSON) produced by the
+/// desktop layer. Profiles written before that stored raw RGBA number arrays; those are
+/// still read and are converted to PNG by the desktop layer after startup.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SavedFavicon {
+    Png(Vec<u8>),
+    Rgba {
+        width: usize,
+        height: usize,
+        rgba: Vec<u8>,
+    },
+}
+impl SavedFavicon {
+    /// Pixel size from the PNG header or the legacy fields, without decoding pixels.
+    pub fn dimensions(&self) -> Option<(usize, usize)> {
+        match self {
+            Self::Png(bytes) => png_dimensions(bytes),
+            Self::Rgba { width, height, .. } => Some((*width, *height)),
+        }
+    }
+    /// Structurally valid and no larger than `max` pixels in each direction.
+    pub fn valid(&self, max: usize) -> bool {
+        let Some((width, height)) = self.dimensions() else {
+            return false;
+        };
+        let sized = width > 0 && height > 0 && width <= max && height <= max;
+        sized
+            && match self {
+                Self::Png(bytes) => bytes.len() <= MAX_FAVICON_BYTES,
+                Self::Rgba { rgba, .. } => rgba.len() == width * height * 4,
+            }
+    }
+}
+fn png_dimensions(bytes: &[u8]) -> Option<(usize, usize)> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || &bytes[..8] != SIGNATURE || &bytes[12..16] != b"IHDR" {
+        return None;
+    }
+    let field = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap()) as usize;
+    Some((field(16), field(20)))
+}
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum FaviconRepr {
+    Png {
+        png: String,
+    },
+    Rgba {
+        width: usize,
+        height: usize,
+        rgba: Vec<u8>,
+    },
+}
+impl Serialize for SavedFavicon {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Png(bytes) => FaviconRepr::Png {
+                png: crate::base64_text::encode(bytes),
+            },
+            Self::Rgba {
+                width,
+                height,
+                rgba,
+            } => FaviconRepr::Rgba {
+                width: *width,
+                height: *height,
+                rgba: rgba.clone(),
+            },
+        }
+        .serialize(serializer)
+    }
+}
+impl<'de> Deserialize<'de> for SavedFavicon {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // A corrupt icon must not make the whole profile unreadable: invalid base64
+        // becomes an empty image that `normalize` discards.
+        Ok(match FaviconRepr::deserialize(deserializer)? {
+            FaviconRepr::Png { png } => {
+                Self::Png(crate::base64_text::decode(&png).unwrap_or_default())
+            }
+            FaviconRepr::Rgba {
+                width,
+                height,
+                rgba,
+            } => Self::Rgba {
+                width,
+                height,
+                rgba,
+            },
+        })
+    }
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(default)]
@@ -38,6 +127,8 @@ pub struct Profile {
     pub theme: crate::model::Theme,
     pub sidebar_width: f32,
     pub urls: Vec<String>,
+    /// Last known page titles for `urls`, shown for tabs that are not loaded yet.
+    pub titles: Vec<String>,
     pub active: usize,
     pub bookmarks: Vec<Bookmark>,
     pub history: Vec<Bookmark>,
@@ -53,6 +144,7 @@ impl Default for Profile {
             theme: crate::model::Theme::default(),
             sidebar_width: 240.0,
             urls: vec![HOME.into()],
+            titles: Vec::new(),
             active: 0,
             bookmarks: vec![
                 Bookmark {
@@ -78,9 +170,6 @@ impl Profile {
             Ok(bytes) => {
                 let mut profile: Self = serde_json::from_slice(&bytes)
                     .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
-                for address in &mut profile.urls {
-                    *address = canonical_internal_address(address);
-                }
                 profile.normalize();
                 Ok(profile)
             }
@@ -100,19 +189,25 @@ impl Profile {
             self.sidebar_width = 240.0;
         }
         self.sidebar_width = self.sidebar_width.clamp(150.0, 500.0);
-        self.urls.retain(|url| resolve_address(url).is_ok());
-        self.urls.truncate(100);
+        let mut titles = std::mem::take(&mut self.titles).into_iter();
+        let tabs: Vec<(String, String)> = std::mem::take(&mut self.urls)
+            .into_iter()
+            .map(|url| (url, titles.next().unwrap_or_default()))
+            .filter(|(url, _)| resolve_address(url).is_ok())
+            .take(100)
+            .collect();
+        (self.urls, self.titles) = tabs.into_iter().unzip();
+        for title in &mut self.titles {
+            if title.len() > 512 {
+                *title = title.chars().take(256).collect();
+            }
+        }
         if self.urls.is_empty() {
             self.urls.push(HOME.into());
+            self.titles.push(String::new());
         }
         self.active = self.active.min(self.urls.len() - 1);
-        self.favicons.retain(|_, image| {
-            image.width > 0
-                && image.height > 0
-                && image.width <= 64
-                && image.height <= 64
-                && image.rgba.len() == image.width * image.height * 4
-        });
+        self.favicons.retain(|_, image| image.valid(64));
         while self.favicons.len() > 128 {
             self.favicons.pop_first();
         }
@@ -135,9 +230,9 @@ impl Profile {
     }
 
     pub fn default_dir() -> PathBuf {
-        directories::ProjectDirs::from("org", "ServoBrowser", "ServoBrowser")
+        directories::ProjectDirs::from("io.github", "wulfnb", "Wega")
             .map(|p| p.data_local_dir().to_owned())
-            .unwrap_or_else(|| PathBuf::from(".servo-browser"))
+            .unwrap_or_else(|| PathBuf::from(".wega"))
     }
 }
 
@@ -171,22 +266,13 @@ pub fn history_date(visited_at: u64, now: chrono::DateTime<chrono::Local>) -> (S
     (group, date.format("%H:%M").to_string())
 }
 
-// Retain legacy internal links while showing the current product scheme.
-fn canonical_internal_address(input: &str) -> String {
-    if let Ok(mut url) = Url::parse(input)
-        && url.scheme() == "servo"
-        && matches!(
-            url.host_str(),
-            Some("newtab" | "history" | "bookmarks" | "settings")
-        )
-    {
-        let _ = url.set_scheme("lotse");
-        return url.to_string();
-    }
-    input.into()
+/// Resolve an address with the default search engine.
+pub fn resolve_address(input: &str) -> Result<Url, String> {
+    resolve_address_with(input, &crate::model::Policy::default())
 }
 
-pub fn resolve_address(input: &str) -> Result<Url, String> {
+/// Resolve typed input to a URL; text that is not an address searches with the policy's engine.
+pub fn resolve_address_with(input: &str, policy: &crate::model::Policy) -> Result<Url, String> {
     let input = input.trim();
     if input.is_empty() {
         return Url::parse(HOME).map_err(|e| e.to_string());
@@ -195,9 +281,9 @@ pub fn resolve_address(input: &str) -> Result<Url, String> {
         return Url::from_file_path(input).map_err(|_| "Invalid local file path".into());
     }
     if input.contains("://") || input.starts_with("about:") || input.starts_with("data:") {
-        let url = Url::parse(&canonical_internal_address(input)).map_err(|e| e.to_string())?;
+        let url = Url::parse(input).map_err(|e| e.to_string())?;
         return match url.scheme() {
-            "http" | "https" | "file" | "data" | "servo" | "lotse" => Ok(url),
+            "http" | "https" | "file" | "data" | "wega" => Ok(url),
             "about" if url.as_str() == "about:blank" => Ok(url),
             _ => Err(format!("Unsupported address scheme: {}", url.scheme())),
         };
@@ -214,9 +300,7 @@ pub fn resolve_address(input: &str) -> Result<Url, String> {
             .map_err(|e| e.to_string());
         }
     }
-    let mut url = Url::parse("https://www.google.com/search").unwrap();
-    url.query_pairs_mut().append_pair("q", input);
-    Ok(url)
+    Ok(policy.search_url(input))
 }
 
 /// Move a tab while preserving the identity of the selected tab.

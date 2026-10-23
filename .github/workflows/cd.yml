@@ -11,9 +11,9 @@ on:
         required: false
         default: 'test-preview'
 
-permissions:
-  contents: write
-  packages: write
+# No default token scopes: each job requests only what it needs, and only the
+# publishing jobs receive write or OIDC (attestation) permissions.
+permissions: {}
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -31,29 +31,48 @@ jobs:
     name: Package macOS Bundle (ARM64)
     runs-on: macos-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
     env:
       CARGO_BUILD_JOBS: 4
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: "lotse-cd-macos"
+          shared-key: "wega-cd-macos"
       - name: Native system dependencies
         run: brew install pkgconf gstreamer libnice-gstreamer
-      - name: Build and bundle Lotse.app
+      - name: Install license notice generator
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
+      - name: Build and bundle Wega.app
         run: bash scripts/package-macos.sh
       - name: Create DMG and ZIP distributions
         run: |
           mkdir -p dist
-          # Create compressed Apple Disk Image (.dmg)
-          hdiutil create -volname "Lotse Browser" -srcfolder target/Lotse.app -ov -format UDZO dist/Lotse-macOS-arm64.dmg
+          # Stage a complete app beside the familiar Applications drag target.
+          staging_dir="$(mktemp -d)"
+          mount_dir="$(mktemp -d)"
+          trap 'hdiutil detach "$mount_dir" >/dev/null 2>&1 || true; rm -rf "$staging_dir" "$mount_dir"' EXIT
+          ditto target/Wega.app "$staging_dir/Wega.app"
+          ln -s /Applications "$staging_dir/Applications"
+          cp docs/install-macos.txt "$staging_dir/Read Me.txt"
+          hdiutil create -volname "Wega Browser" -srcfolder "$staging_dir" -ov -format UDZO dist/Wega-macOS-arm64.dmg
+          # Check the actual mounted distribution, not just the staging folder.
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" dist/Wega-macOS-arm64.dmg
+          test -f "$mount_dir/Wega.app/Contents/Info.plist"
+          test -x "$mount_dir/Wega.app/Contents/MacOS/wega"
+          test "$(readlink "$mount_dir/Applications")" = /Applications
+          test -f "$mount_dir/Read Me.txt"
+          hdiutil detach "$mount_dir"
           # Create standard portable archive (.zip)
-          ditto -c -k --sequesterRsrc --keepParent target/Lotse.app dist/Lotse-macOS-arm64.zip
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+          ditto -c -k --sequesterRsrc --keepParent target/Wega.app dist/Wega-macOS-arm64.zip
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: macos-dist
           path: dist/*
@@ -63,20 +82,30 @@ jobs:
     name: Build Linux Package & Docker (GHCR)
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Set lowercased image repository name
-        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "IMAGE_NAME=ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push production Docker image
-        uses: docker/build-push-action@v6
+        id: image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ./Dockerfile
@@ -84,70 +113,98 @@ jobs:
           provenance: false
           build-args: |
             BUILD_JOBS=4
+            WEGA_SOURCE_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.IMAGE_NAME }}:latest
             ${{ env.IMAGE_NAME }}:test
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Attest Docker image build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Install license notice generator
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
       - name: Extract standalone Linux binary from built image
         run: |
           mkdir -p dist
           container_id=$(docker create "${{ env.IMAGE_NAME }}:${{ github.sha }}")
-          docker cp "$container_id:/usr/local/bin/servo-browser" ./servo-browser-linux
+          docker cp "$container_id:/usr/local/bin/wega" ./wega-linux
           docker rm "$container_id"
-          chmod 755 ./servo-browser-linux
-          bash scripts/package-linux.sh ./servo-browser-linux
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+          chmod 755 ./wega-linux
+          bash scripts/package-linux.sh ./wega-linux
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: linux-dist
-          path: dist/Lotse-Linux-x86_64.tar.gz
+          path: dist/Wega-Linux-x86_64.tar.gz
 
   build-windows:
     needs: ci-validation
     name: Package Windows (x64)
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Install pinned toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: "lotse-cd-windows"
+          shared-key: "wega-cd-windows"
       - name: Build Windows release executable
         run: cargo build --release --locked --no-default-features --features desktop,brotli-streams
+      - name: Install license notice generator
+        run: cargo install cargo-about --version 0.9.2 --features cli --locked
+      - name: Write LICENSE, NOTICE and THIRD-PARTY-NOTICES.html
+        shell: bash
+        run: bash scripts/third-party-notices.sh dist/wega-windows-x64 --no-default-features --features "desktop brotli-streams" --target x86_64-pc-windows-msvc
       - name: Package Windows ZIP archive
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist\lotse-windows-x64
-          if (!(Test-Path "target\release\servo-browser.exe")) {
+          New-Item -ItemType Directory -Force -Path dist\wega-windows-x64
+          if (!(Test-Path "target\release\wega.exe")) {
             throw "Windows browser executable is missing; refusing an incomplete release"
           }
-          Copy-Item "target\release\servo-browser.exe" -Destination "dist\lotse-windows-x64\"
-          if (Test-Path "LICENSE") {
-            Copy-Item "LICENSE" -Destination "dist\lotse-windows-x64\"
+          Copy-Item "target\release\wega.exe" -Destination "dist\wega-windows-x64\"
+          foreach ($notice in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.html") {
+            if (!(Test-Path "dist\wega-windows-x64\$notice")) {
+              throw "$notice is missing; refusing a release without license notices"
+            }
           }
           if (Test-Path "README.md") {
-            Copy-Item "README.md" -Destination "dist\lotse-windows-x64\"
+            Copy-Item "README.md" -Destination "dist\wega-windows-x64\"
           }
-          Compress-Archive -Path "dist\lotse-windows-x64\*" -DestinationPath "dist\Lotse-Windows-x64.zip" -Force
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+          Compress-Archive -Path "dist\wega-windows-x64\*" -DestinationPath "dist\Wega-Windows-x64.zip" -Force
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-dist
-          path: dist/Lotse-Windows-x64.zip
+          path: dist/Wega-Windows-x64.zip
 
   publish-release:
     name: Publish GitHub Test Release
     needs: [build-macos, build-linux-and-docker, build-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
       - name: Set lowercased image repository name
-        run: echo "IMAGE_NAME=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "IMAGE_NAME=ghcr.io/$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
       - name: Download all release artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: '*-dist'
           path: release-artifacts
@@ -157,9 +214,13 @@ jobs:
           mkdir -p release-files
           cp release-artifacts/* release-files/
           cd release-files
-          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ../SHA256SUMS.txt
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%P\0' | sort -z | xargs -0 sha256sum > ../SHA256SUMS.txt
           mv ../SHA256SUMS.txt ./SHA256SUMS.txt
           cat SHA256SUMS.txt
+      - name: Attest release archive build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: release-files/SHA256SUMS.txt
       - name: Determine Release Tag
         id: tag
         env:
@@ -174,47 +235,82 @@ jobs:
           fi
           git check-ref-format "refs/tags/$release_tag"
           printf 'RELEASE_TAG=%s\n' "$release_tag" >> "$GITHUB_OUTPUT"
+          # The moving test-preview also gets an immutable per-commit prerelease.
+          if [ "$release_tag" = test-preview ]; then
+            printf 'COMMIT_TAG=test-preview-%s\n' "${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Write release notes
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          REF_NAME: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          cat > release-notes.md <<EOF
+          ## Wega Browser — Test / Preview Release
+
+          This is an automated test release built directly from commit \`$GITHUB_SHA\` on branch \`$REF_NAME\`.
+
+          ### Multi-Platform Downloads
+
+          | Platform | Distribution Package | Description |
+          | :--- | :--- | :--- |
+          | **macOS (Apple Silicon)** | \`Wega-macOS-arm64.dmg\` / \`.zip\` | Native macOS app bundle (\`Wega.app\`) with GStreamer media plugins and AppKit vibrancy |
+          | **Linux (x86_64)** | \`Wega-Linux-x86_64.tar.gz\` | Portable Linux archive with standalone launcher and desktop entry |
+          | **Windows (x64)** | \`Wega-Windows-x64.zip\` | Portable Windows archive with \`wega.exe\` and documentation |
+
+          Every download contains \`LICENSE\` (MPL-2.0), \`NOTICE\` and \`THIRD-PARTY-NOTICES.html\`.
+          The macOS app uses Apple's system codecs and bundles no FFmpeg, x264 or other GPL codecs.
+
+          ### Docker Container (noVNC / HTTPS Gateway)
+
+          You can pull and launch the full containerized browser with its secure authenticated web viewer:
+
+          \`\`\`sh
+          docker pull $IMAGE_NAME:latest
+
+          docker run -d \\
+            --name wega-browser \\
+            -p 127.0.0.1:7443:7443 \\
+            -e BROWSER_USER=servo \\
+            -e BROWSER_PASSWORD='your-strong-password' \\
+            -v wega-profile:/config \\
+            $IMAGE_NAME:latest
+          \`\`\`
+
+          Then navigate to **https://localhost:7443** in your local browser and sign in.
+          Never expose port 7443 directly to the internet; use Tailscale/WireGuard or a trusted reverse proxy for remote access.
+
+          ### Integrity & Provenance
+
+          SHA256 checksums are provided in \`SHA256SUMS.txt\`. Every archive and the Docker image carry
+          a GitHub build-provenance attestation:
+
+          \`\`\`sh
+          gh attestation verify Wega-macOS-arm64.dmg --repo $REPOSITORY
+          gh attestation verify oci://$IMAGE_NAME:$GITHUB_SHA --repo $REPOSITORY
+          \`\`\`
+          EOF
       - name: Create or Update GitHub Pre-Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.tag.outputs.RELEASE_TAG }}
-          name: "Lotse Test Release (${{ steps.tag.outputs.RELEASE_TAG }})"
+          target_commitish: ${{ github.sha }}
+          name: "Wega Test Release (${{ steps.tag.outputs.RELEASE_TAG }})"
           prerelease: true
           make_latest: false
           files: |
             release-files/*
-          body: |
-            ## Lotse Browser — Test / Preview Release
-
-            This is an automated test release built directly from commit `${{ github.sha }}` on branch `${{ github.ref_name }}`.
-
-            ### Multi-Platform Downloads
-
-            | Platform | Distribution Package | Description |
-            | :--- | :--- | :--- |
-            | **macOS (Apple Silicon)** | `Lotse-macOS-arm64.dmg` / `.zip` | Native macOS app bundle (`Lotse.app`) with GStreamer media plugins and AppKit vibrancy |
-            | **Linux (x86_64)** | `Lotse-Linux-x86_64.tar.gz` | Portable Linux archive with standalone launcher and desktop entry |
-            | **Windows (x64)** | `Lotse-Windows-x64.zip` | Portable Windows archive with `servo-browser.exe` and documentation |
-
-            ### Docker Container (noVNC / HTTPS Gateway)
-
-            You can pull and launch the full containerized browser with its secure authenticated web viewer:
-
-            ```sh
-            docker pull ${{ env.IMAGE_NAME }}:latest
-
-            docker run -d \
-              --name lotse-browser \
-              -p 7443:7443 \
-              -e BROWSER_USER=servo \
-              -e BROWSER_PASSWORD='your-strong-password' \
-              -v lotse-profile:/config \
-              ${{ env.IMAGE_NAME }}:latest
-            ```
-
-            Then navigate to **https://localhost:7443** in your local browser and sign in.
-
-            ### Integrity & Checksums
-
-            SHA256 checksums are provided in `SHA256SUMS.txt`.
-
+          body_path: release-notes.md
+      - name: Create immutable per-commit Pre-Release
+        if: steps.tag.outputs.COMMIT_TAG != ''
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          tag_name: ${{ steps.tag.outputs.COMMIT_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: "Wega Test Release (${{ steps.tag.outputs.COMMIT_TAG }})"
+          prerelease: true
+          make_latest: false
+          overwrite_files: false
+          files: |
+            release-files/*
+          body_path: release-notes.md

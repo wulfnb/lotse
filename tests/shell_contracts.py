@@ -6,9 +6,11 @@ Run in the disposable test-tools image, never on a host: entrypoint tests write
 media-packager ports; actual cp/chmod/tar and generated launchers are exercised.
 """
 import argparse
+import grp
 import hashlib
 import json
 import os
+import pwd
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,12 +32,13 @@ def main():
     raw = output / 'raw'
     raw.mkdir(exist_ok=True)
     collection = Path(tempfile.mkdtemp(prefix='run-', dir=raw))
-    with tempfile.TemporaryDirectory(prefix='lotse-shell-') as temporary:
+    with tempfile.TemporaryDirectory(prefix='wega-shell-') as temporary:
         work = Path(temporary)
         checkout = work / 'checkout'
         for name in ['docker', 'scripts', 'assets']:
             shutil.copytree(source / name, checkout / name)
-        shutil.copy2(source / 'LICENSE', checkout / 'LICENSE')
+        for name in ['LICENSE', 'NOTICE', 'about.toml', 'about.hbs']:
+            shutil.copy2(source / name, checkout / name)
         fake = work / 'bin'
         fake.mkdir()
         calls = work / 'calls.jsonl'
@@ -44,14 +47,17 @@ def main():
             path.write_text('#!/usr/bin/python3\nimport os,sys,json\nfrom pathlib import Path\n' + body)
             path.chmod(0o755)
         log = f"with open({str(calls)!r},'a') as f: f.write(json.dumps([Path(sys.argv[0]).name,sys.argv[1:]])+'\\n')\n"
-        program('cargo', log)
+        # cargo-about is a port too: `--version` probes it, `generate` writes the notices.
+        program('cargo', log + "if sys.argv[1:3] == ['about', '--version'] and os.environ.get('FAKE_NO_CARGO_ABOUT'): sys.exit(1)\n"
+                "if sys.argv[1:3] == ['about', 'generate'] and not os.environ.get('FAKE_EMPTY_NOTICES'): Path(sys.argv[sys.argv.index('--output-file') + 1]).write_text('<html>notices</html>')\n")
+        program('git', "print('0123456789abcdef0123456789abcdef01234567')\n")
         program('python3', log)
         program('uname', "print('Darwin')\n")
         program('supervisord', log + "assert not any(k in os.environ for k in ['BROWSER_USER','BROWSER_PASSWORD','BROWSER_PASSWORD_FILE'])\n")
         program('supervisorctl', "print('\\n'.join(f'worker{i} RUNNING pid 1' for i in range(6)))\n")
         program('curl', "print('401' if '/auth/account' in sys.argv[-1] else '')\n")
-        program('xdpyinfo', "p=Path('/tmp/lotse-display-attempts');n=int(p.read_text()) if p.exists() else 0;p.write_text(str(n+1));sys.exit(0 if n else 1)\n")
-        program('servo-browser', log)
+        program('xdpyinfo', "p=Path('/tmp/wega-display-attempts');n=int(p.read_text()) if p.exists() else 0;p.write_text(str(n+1));sys.exit(0 if n else 1)\n")
+        program('wega', log + f"with open({str(work / 'wega-env.jsonl')!r},'a') as f: f.write(json.dumps([os.environ.get('LP_NUM_THREADS'),os.environ.get('GALLIUM_DRIVER')])+'\\n')\n")
         base_env = os.environ.copy()
         base_env['PATH'] = str(fake) + ':' + base_env['PATH']
         runs = []
@@ -64,29 +70,43 @@ def main():
             return result
         # Linux packaging: real filesystem/archive operations, isolated fake binary.
         run('scripts/package-linux.sh', [str(work / 'missing')], success=False)
-        binary = checkout / 'target/release/servo-browser'
+        binary = checkout / 'target/release/wega'
         binary.parent.mkdir(parents=True)
         binary.write_text('#!/bin/sh\nprintf "launcher:%s\\n" "$1"\n')
         binary.chmod(0o755)
         run('scripts/package-linux.sh')
-        package = checkout / 'dist/lotse-linux-x86_64'
-        assert (package / 'share/applications/lotse.desktop').read_text().startswith('[Desktop Entry]')
-        assert subprocess.check_output([str(package / 'bin/lotse'), 'literal argument'], text=True).strip() == 'launcher:literal argument'
-        shutil.move(checkout / 'LICENSE', work / 'LICENSE')
+        package = checkout / 'dist/wega-linux-x86_64'
+        assert (package / 'share/applications/wega.desktop').read_text().startswith('[Desktop Entry]')
+        assert subprocess.check_output([str(package / 'bin/wega'), 'literal argument'], text=True).strip() == 'launcher:literal argument'
+        assert (package / 'LICENSE').read_bytes() == (checkout / 'LICENSE').read_bytes()
+        assert (package / 'THIRD-PARTY-NOTICES.html').read_text() == '<html>notices</html>'
+        assert 'source commit: 0123456789abcdef0123456789abcdef01234567' in (package / 'NOTICE').read_text()
         shutil.move(checkout / 'assets/icons/browser-icon-256.png', work / 'icon.png')
         run('scripts/package-linux.sh', [str(binary)])
-        shutil.move(work / 'LICENSE', checkout / 'LICENSE')
+        # Third-party notices: usage, missing tool, empty output and explicit commit.
+        notices = work / 'notices'
+        run('scripts/third-party-notices.sh', success=False)
+        run('scripts/third-party-notices.sh', ['--features'], success=False)
+        run('scripts/third-party-notices.sh', [str(notices)], env=dict(base_env, FAKE_NO_CARGO_ABOUT='1'), success=False)
+        run('scripts/third-party-notices.sh', [str(notices)], env=dict(base_env, FAKE_EMPTY_NOTICES='1'), success=False)
+        run('scripts/third-party-notices.sh', [str(notices), '--features', 'media'], env=dict(base_env, WEGA_SOURCE_COMMIT='feedface'))
+        notice = (notices / 'NOTICE').read_text()
+        assert notice.startswith((checkout / 'NOTICE').read_text())
+        assert 'source commit: feedface\nCorresponding source: https://github.com/wulfnb/wega/tree/feedface' in notice
+        commands = [json.loads(line) for line in calls.read_text().splitlines()]
+        assert any(name == 'cargo' and arguments[:5] == ['about', 'generate', '--locked', '--fail', '--config'] and arguments[-5:-3] == ['--features', 'media'] for name, arguments in commands)
         # macOS packager contracts substitute only external compiler/media ports.
         linux_env = dict(base_env, PATH='/usr/bin:/bin')
         run('scripts/package-macos.sh', env=linux_env, success=False)
         run('scripts/package-macos.sh', ['--invalid'], success=False)
         run('scripts/package-macos.sh', ['--no-media'])
-        debug = checkout / 'target/debug/servo-browser'
+        debug = checkout / 'target/debug/wega'
         debug.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(binary, debug)
         run('scripts/package-macos.sh', ['--debug', '--media'])
-        assert (checkout / 'target/Lotse.app/Contents/MacOS/servo-browser').read_bytes() == debug.read_bytes()
-        assert 'org.medimesh.ServoBrowser' in (checkout / 'target/Lotse.app/Contents/Info.plist').read_text()
+        assert (checkout / 'target/Wega.app/Contents/MacOS/wega').read_bytes() == debug.read_bytes()
+        assert 'io.github.wulfnb.wega' in (checkout / 'target/Wega.app/Contents/Info.plist').read_text()
+        assert (checkout / 'target/Wega.app/Contents/Resources/THIRD-PARTY-NOTICES.html').is_file()
         commands = [json.loads(line) for line in calls.read_text().splitlines()]
         assert ['cargo', ['build', '--locked', '--release', '--no-default-features', '--features', 'brotli-streams']] in commands
         assert ['cargo', ['build', '--locked', '--features', 'media']] in commands
@@ -98,11 +118,111 @@ def main():
         Path('/config/auth').mkdir(parents=True, exist_ok=True)
         run('docker/entrypoint.sh', env=env)
         assert (Path('/config/tls/server.key').stat().st_mode & 0o777) == 0o600
-        assert (Path('/run/servo').stat().st_mode & 0o777) == 0o700
+        assert (Path('/run/wega/browser').stat().st_mode & 0o777) == 0o700
         run('docker/entrypoint.sh', ['/bin/sh', '-c', 'test -z "${BROWSER_USER+x}${BROWSER_PASSWORD+x}${BROWSER_PASSWORD_FILE+x}"'], env=env)
         for resolution in ['', 'bad', '800x600x2', 'x600', '800x', '799x600', '800x599', '3841x600', '800x2161']:
             run('docker/entrypoint.sh', env=dict(env, BROWSER_RESOLUTION=resolution), success=False)
         run('docker/entrypoint.sh', ['healthcheck'], env=env)
+        # TLS lifecycle with real openssl: unchanged settings keep the certificate,
+        # SAN changes / expiry / legacy RSA regenerate it, user files win.
+        tls = Path('/config/tls')
+        crt, key, marker = tls / 'server.crt', tls / 'server.key', tls / 'generated.conf'
+        default_settings = 'v2 ec-p256 365d DNS:localhost,IP:127.0.0.1'
+        def openssl(*arguments):
+            return subprocess.run(['openssl', *arguments], check=True, capture_output=True, text=True).stdout
+        def certificate(key_path, crt_path, subject, *, days=365, algorithm=('-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1')):
+            openssl('req', '-x509', *algorithm, '-nodes', '-days', str(days), '-subj', subject, '-keyout', str(key_path), '-out', str(crt_path))
+        def subject():
+            return openssl('x509', '-noout', '-subject', '-in', str(crt)).strip()
+        assert marker.read_text() == default_settings + '\n' and subject() == 'subject=CN=Wega'
+        generated = crt.read_bytes()
+        run('docker/entrypoint.sh', ['renew-tls'], env=env)
+        assert crt.read_bytes() == generated, 'unchanged valid certificate must be kept'
+        for sans in ['bad/name', 'DNS:', 'host_name', 'IP:10.0.0.1;rm']:
+            result = run('docker/entrypoint.sh', ['renew-tls'], env=dict(env, BROWSER_TLS_SANS=sans), success=False)
+            assert 'BROWSER_TLS_SANS: invalid entry' in result.stderr, result.stderr
+            assert crt.read_bytes() == generated and marker.read_text() == default_settings + '\n'
+        sans_env = dict(env, BROWSER_TLS_SANS=' wega.lan ,,DNS:proxy.example,10.0.0.5,::1,\t*.example.com')
+        run('docker/entrypoint.sh', ['renew-tls'], env=sans_env)
+        assert marker.read_text() == default_settings + ',DNS:wega.lan,DNS:proxy.example,IP:10.0.0.5,IP:::1,DNS:*.example.com\n'
+        names = openssl('x509', '-noout', '-ext', 'subjectAltName', '-in', str(crt))
+        for name in ['DNS:localhost', 'DNS:wega.lan', 'DNS:proxy.example', 'IP Address:10.0.0.5', 'DNS:*.example.com']:
+            assert name in names, names
+        assert crt.read_bytes() != generated and (key.stat().st_mode & 0o777) == 0o600
+        assert key.stat().st_uid == pwd.getpwnam('browser').pw_uid and not list(tls.glob('.*.new'))
+        generated = crt.read_bytes()
+        run('docker/entrypoint.sh', ['renew-tls'], env=sans_env)
+        assert crt.read_bytes() == generated, 'same SAN settings must keep the certificate'
+        # Expiring within 30 days (matching settings) is renewed by renew-tls.
+        certificate(key, crt, '/CN=Wega', days=1)
+        marker.write_text(default_settings + '\n')
+        expiring = crt.read_bytes()
+        run('docker/entrypoint.sh', ['renew-tls'], env=env)
+        assert crt.read_bytes() != expiring and marker.read_text() == default_settings + '\n'
+        openssl('x509', '-checkend', '2592000', '-noout', '-in', str(crt))
+        # Legacy self-signed RSA localhost certificate (no marker) is migrated.
+        marker.unlink()
+        certificate(key, crt, '/CN=localhost', days=3650, algorithm=('-newkey', 'rsa:2048'))
+        run('docker/entrypoint.sh', env=env)
+        assert subject() == 'subject=CN=Wega' and marker.read_text() == default_settings + '\n'
+        assert 'prime256v1' in openssl('pkey', '-in', str(key), '-text_pub', '-noout'), 'legacy RSA key must be replaced by EC P-256'
+        # Mounted certificate files: both required and readable, copied, marker dropped.
+        mounted = work / 'mounted-tls'
+        mounted.mkdir()
+        certificate(mounted / 'key.pem', mounted / 'cert.pem', '/CN=mounted.example')
+        for partial in [dict(WEGA_TLS_CERT_FILE=str(mounted / 'cert.pem')), dict(WEGA_TLS_KEY_FILE=str(mounted / 'key.pem')),
+                        dict(WEGA_TLS_CERT_FILE=str(mounted / 'cert.pem'), WEGA_TLS_KEY_FILE=str(mounted / 'missing.pem'))]:
+            result = run('docker/entrypoint.sh', ['renew-tls'], env=dict(env, **partial), success=False)
+            assert 'WEGA_TLS_CERT_FILE and WEGA_TLS_KEY_FILE must both name readable files' in result.stderr, result.stderr
+        assert marker.exists() and subject() == 'subject=CN=Wega'
+        mounted_env = dict(env, WEGA_TLS_CERT_FILE=str(mounted / 'cert.pem'), WEGA_TLS_KEY_FILE=str(mounted / 'key.pem'))
+        run('docker/entrypoint.sh', ['renew-tls'], env=mounted_env)
+        assert crt.read_bytes() == (mounted / 'cert.pem').read_bytes() and key.read_bytes() == (mounted / 'key.pem').read_bytes()
+        assert (crt.stat().st_mode & 0o777) == 0o644 and (key.stat().st_mode & 0o777) == 0o600 and not marker.exists()
+        assert crt.stat().st_uid == pwd.getpwnam('browser').pw_uid
+        os.utime(crt, ns=(1, 1)); os.utime(key, ns=(1, 1))
+        run('docker/entrypoint.sh', ['renew-tls'], env=mounted_env)
+        assert (crt.stat().st_mtime_ns, key.stat().st_mtime_ns) == (1, 1), 'identical mounted files must not be reinstalled'
+        # A certificate the user placed in the volume (no marker, not legacy) is never replaced,
+        # not even when SAN settings are requested.
+        placed = crt.read_bytes()
+        run('docker/entrypoint.sh', ['renew-tls'], env=sans_env)
+        assert crt.read_bytes() == placed and not marker.exists() and subject() == 'subject=CN=mounted.example'
+        # Trusted reverse proxies render the nginx real_ip include; invalid values abort.
+        realip = Path('/run/wega/browser/nginx-realip.conf')
+        run('docker/entrypoint.sh', env=dict(env, WEGA_TRUSTED_PROXIES='10.0.0.0/8, unix:,2001:DB8::/32,192.168.1.1'))
+        assert realip.read_text() == ('set_real_ip_from 10.0.0.0/8;\nset_real_ip_from unix:;\nset_real_ip_from 2001:DB8::/32;\n'
+                                      'set_real_ip_from 192.168.1.1;\nreal_ip_header X-Forwarded-For;\nreal_ip_recursive on;\n')
+        assert (realip.stat().st_mode & 0o777) == 0o644 and not Path(str(realip) + '.new').exists()
+        for proxies in ['proxy.example', '10.0.0.1,unix:/tmp/x', '10.0.0.1;']:
+            result = run('docker/entrypoint.sh', env=dict(env, WEGA_TRUSTED_PROXIES=proxies), success=False)
+            assert 'WEGA_TRUSTED_PROXIES: invalid address' in result.stderr, result.stderr
+            assert not realip.exists(), 'a rejected proxy list must not leave a stale include active'
+        run('docker/entrypoint.sh', env=dict(env, WEGA_TRUSTED_PROXIES='10.0.0.1'))
+        assert realip.exists()
+        run('docker/entrypoint.sh', env=env)
+        assert not realip.exists(), 'unsetting WEGA_TRUSTED_PROXIES must remove the include'
+        # Legacy uploads move from the credential directory; existing names win.
+        legacy = Path('/config/auth/uploads')
+        (legacy / 'folder').mkdir(parents=True)
+        (legacy / 'a.txt').write_text('legacy a')
+        (legacy / 'dup.txt').write_text('legacy dup')
+        (legacy / 'folder/inner.txt').write_text('inner')
+        Path('/config/uploads').mkdir(parents=True, exist_ok=True)
+        Path('/config/uploads/dup.txt').write_text('current dup')
+        run('docker/entrypoint.sh', env=env)
+        uploads = Path('/config/uploads')
+        assert not legacy.exists()
+        assert (uploads / 'a.txt').read_text() == 'legacy a' and (uploads / 'dup.txt').read_text() == 'current dup'
+        assert (uploads / 'folder/inner.txt').read_text() == 'inner'
+        owner, group = pwd.getpwnam('wega-auth').pw_uid, grp.getgrnam('browser').gr_gid
+        for path in [uploads, uploads / 'folder']:
+            assert (path.stat().st_mode & 0o7777) == 0o2750 and (path.stat().st_uid, path.stat().st_gid) == (owner, group), path
+        for path in [uploads / 'a.txt', uploads / 'dup.txt', uploads / 'folder/inner.txt']:
+            assert (path.stat().st_mode & 0o7777) == 0o640 and (path.stat().st_uid, path.stat().st_gid) == (owner, group), path
+        legacy.mkdir()
+        run('docker/entrypoint.sh', env=env)
+        assert not legacy.exists() and sorted(p.name for p in uploads.iterdir()) == ['a.txt', 'dup.txt', 'folder']
         Path('/config/browser').mkdir(parents=True, exist_ok=True)
         profile = Path('/config/browser/browser.json')
         profile.unlink(missing_ok=True)
@@ -110,9 +230,13 @@ def main():
         run('docker/start-browser.sh', env=env)
         profile.write_text('{}')
         run('docker/start-browser.sh', env=env)
+        run('docker/start-browser.sh', env=dict(env, WEGA_RENDER_THREADS='6', WEGA_GALLIUM_DRIVER='softpipe'))
         commands = [json.loads(line) for line in calls.read_text().splitlines()]
-        assert ['servo-browser', ['--profile-dir', '/config/browser', '--', env['BROWSER_START_URL']]] in commands
-        assert ['servo-browser', ['--profile-dir', '/config/browser']] in commands
+        assert ['wega', ['--profile-dir', '/config/browser', '--', env['BROWSER_START_URL']]] in commands
+        assert ['wega', ['--profile-dir', '/config/browser']] in commands
+        # llvmpipe rasterizer threads are bounded by default and overridable.
+        renderers = [json.loads(line) for line in (work / 'wega-env.jsonl').read_text().splitlines()]
+        assert renderers == [['2', 'llvmpipe'], ['2', 'llvmpipe'], ['6', 'softpipe']], renderers
         # Merge exact collector counters, never infer hits from source text.
         merged = collection / 'merged'
         subprocess.run(['kcov', '--merge', str(merged), *map(str, runs)], check=True, capture_output=True, timeout=60)
@@ -126,13 +250,13 @@ def main():
                     name = path.relative_to(checkout).as_posix()
                 except ValueError:
                     continue
-                if name not in ['docker/entrypoint.sh', 'docker/start-browser.sh', 'scripts/package-linux.sh', 'scripts/package-macos.sh']:
+                if name not in ['docker/entrypoint.sh', 'docker/start-browser.sh', 'scripts/package-linux.sh', 'scripts/package-macos.sh', 'scripts/third-party-notices.sh']:
                     continue
                 counters = samples.setdefault(name, {})
                 for line in item.findall('./lines/line'):
                     number, hits = int(line.attrib['number']), int(line.attrib['hits'])
                     counters[number] = max(counters.get(number, 0), hits)
-        assert len(samples) == 4, f'Incomplete shell collector output: {list(samples)}'
+        assert len(samples) == 5, f'Incomplete shell collector output: {list(samples)}'
         lcov = []
         hashes = {}
         for name, counters in sorted(samples.items()):

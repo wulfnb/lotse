@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-pub use servo_browser::model::Policy;
+pub use wega::model::Policy;
 pub fn intercept(policy: &Policy, load: servo::WebResourceLoad) {
     let url = &load.request().url;
     if policy.offline || !policy.permits(url) {
@@ -40,9 +40,99 @@ pub enum Decision {
     ),
 }
 pub struct Prompt {
+    /// Requesting origin; bounds how many prompts one site can queue.
+    pub origin: String,
     pub title: String,
     pub detail: String,
     pub decision: Decision,
+}
+impl Prompt {
+    fn deny(self) {
+        match self.decision {
+            Decision::Servo(request) | Decision::Protocol(request, _) => request.deny(),
+            Decision::External(_) => {}
+        }
+    }
+}
+
+/// Site-initiated dialogs waiting for the user. Every queue is bounded in total and
+/// per origin (or per page for embedder controls); requests that do not fit are
+/// denied at once, so a page cannot grow the UI's memory or bury other sites' dialogs.
+#[derive(Default)]
+pub struct Dialogs {
+    pub prompts: VecDeque<Prompt>,
+    pub permissions: wega::permissions::Permissions<crate::permission_adapter::Permission>,
+    pub authentications: VecDeque<servo::AuthenticationRequest>,
+    pub controls: VecDeque<(servo::WebViewId, servo::EmbedderControl)>,
+}
+impl Dialogs {
+    pub fn is_empty(&self) -> bool {
+        self.prompts.is_empty()
+            && self.permissions.is_empty()
+            && self.authentications.is_empty()
+            && self.controls.is_empty()
+    }
+    pub fn push_prompt(&mut self, prompt: Prompt) -> bool {
+        if wega::permissions::admit(
+            self.prompts.iter().map(|p| p.origin.as_str()),
+            &prompt.origin,
+        ) {
+            self.prompts.push_back(prompt);
+            true
+        } else {
+            prompt.deny();
+            false
+        }
+    }
+    /// Dropping an unanswered authentication request cancels it in Servo.
+    pub fn push_authentication(&mut self, request: servo::AuthenticationRequest) -> bool {
+        let origins: Vec<String> = self
+            .authentications
+            .iter()
+            .map(|r| r.url().origin().ascii_serialization())
+            .collect();
+        let admitted = wega::permissions::admit(
+            origins.iter().map(String::as_str),
+            &request.url().origin().ascii_serialization(),
+        );
+        if admitted {
+            self.authentications.push_back(request);
+        }
+        admitted
+    }
+    /// Dropping an embedder control answers it with its default (cancel) response.
+    pub fn push_control(
+        &mut self,
+        owner: servo::WebViewId,
+        control: servo::EmbedderControl,
+    ) -> bool {
+        let owners: Vec<String> = self
+            .controls
+            .iter()
+            .map(|(id, _)| format!("{id:?}"))
+            .collect();
+        let admitted =
+            wega::permissions::admit(owners.iter().map(String::as_str), &format!("{owner:?}"));
+        if admitted {
+            self.controls.push_back((owner, control));
+        }
+        admitted
+    }
+    pub fn has_controls_for(&self, owner: servo::WebViewId) -> bool {
+        self.controls.iter().any(|(id, _)| *id == owner)
+    }
+    /// Cancel controls of a page that is being closed or unloaded.
+    pub fn forget(&mut self, owner: servo::WebViewId) {
+        self.controls.retain(|(id, _)| *id != owner);
+    }
+    pub fn clear(&mut self) {
+        while let Some(prompt) = self.prompts.pop_front() {
+            prompt.deny();
+        }
+        self.permissions.clear();
+        self.authentications.clear();
+        self.controls.clear();
+    }
 }
 #[derive(Default)]
 pub struct State {
@@ -56,7 +146,6 @@ pub struct State {
     pub delete_site: Option<String>,
     pub settings_section: usize,
     pub diagnostics: bool,
-    pub prompts: VecDeque<Prompt>,
     pub sites: Vec<(String, String)>,
     pub cookies: Vec<String>,
     pub script: Option<std::rc::Rc<servo::UserScript>>,
@@ -88,7 +177,7 @@ impl ProtocolHandler for InternalPages {
             http::header::CONTENT_TYPE,
             http::HeaderValue::from_static("text/html; charset=utf-8"),
         );
-        response.headers.insert(http::header::CONTENT_SECURITY_POLICY, http::HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action https://www.google.com; frame-ancestors 'none'"));
+        response.headers.insert(http::header::CONTENT_SECURITY_POLICY, http::HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action https:; frame-ancestors 'none'"));
         *response.body.lock() = ResponseBody::Done(body.into_bytes());
         Box::pin(std::future::ready(response))
     }
@@ -104,7 +193,7 @@ pub fn html(value: &str) -> String {
 pub fn theme_stylesheet(palette: crate::theme::Palette) -> String {
     let hex = |c: egui::Color32| format!("#{:02x}{:02x}{:02x}", c.r(), c.g(), c.b());
     format!(
-        ":root{{--lotse-text:{};--lotse-background:{};--lotse-accent:{};--lotse-surface:{};--lotse-border:{};--lotse-selected:{}}}",
+        ":root{{--wega-text:{};--wega-background:{};--wega-accent:{};--wega-surface:{};--wega-border:{};--wega-selected:{}}}",
         hex(palette.text),
         hex(palette.inset),
         hex(palette.accent),
@@ -116,7 +205,7 @@ pub fn theme_stylesheet(palette: crate::theme::Palette) -> String {
 pub fn document(title: &str, body: &str, palette: crate::theme::Palette) -> String {
     let variables = theme_stylesheet(palette);
     format!(
-        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{}</title><style id='lotse-theme'>{variables}</style><style>html{{font:16px system-ui;color:var(--lotse-text);background:var(--lotse-background)}}body{{max-width:850px;margin:48px auto;padding:24px}}a{{color:var(--lotse-accent)}}input,button{{font:inherit;padding:12px;border-radius:8px;max-width:100%;box-sizing:border-box;background:var(--lotse-surface);color:var(--lotse-text);border:1px solid var(--lotse-border)}}button{{background:var(--lotse-selected);cursor:pointer}}.search-controls{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.search-controls input{{width:400px;min-width:0}}.search-controls input,.search-controls button{{height:48px}}nav{{display:flex;flex-wrap:wrap;gap:12px}}:focus-visible{{outline:3px solid var(--lotse-accent);outline-offset:4px}}li{{margin:14px 0}}p{{line-height:1.6}}</style></head><body><nav aria-label='Browser pages'><a href='lotse://newtab'>New tab</a> · <a href='lotse://history'>History</a> · <a href='lotse://bookmarks'>Bookmarks</a> · <a href='lotse://settings'>Settings</a></nav><main><h1>{}</h1>{body}</main></body></html>",
+        "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'><title>{}</title><style id='wega-theme'>{variables}</style><style>html{{font:16px system-ui;color:var(--wega-text);background:var(--wega-background)}}body{{max-width:850px;margin:48px auto;padding:24px}}a{{color:var(--wega-accent)}}input,button{{font:inherit;padding:12px;border-radius:8px;max-width:100%;box-sizing:border-box;background:var(--wega-surface);color:var(--wega-text);border:1px solid var(--wega-border)}}button{{background:var(--wega-selected);cursor:pointer}}.search-controls{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.search-controls input{{width:400px;min-width:0}}.search-controls input,.search-controls button{{height:48px}}nav{{display:flex;flex-wrap:wrap;gap:12px}}:focus-visible{{outline:3px solid var(--wega-accent);outline-offset:4px}}li{{margin:14px 0}}p{{line-height:1.6}}</style></head><body><nav aria-label='Browser pages'><a href='wega://newtab'>New tab</a> · <a href='wega://history'>History</a> · <a href='wega://bookmarks'>Bookmarks</a> · <a href='wega://settings'>Settings</a></nav><main><h1>{}</h1>{body}</main></body></html>",
         html(title),
         html(title)
     )

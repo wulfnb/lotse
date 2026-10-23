@@ -6,6 +6,8 @@ pub(crate) struct State {
     pub connections: usize,
     pub notice: Option<String>,
     focus_url: bool,
+    /// A downloaded program waiting for the user to confirm opening it: (path, source URL).
+    pub confirm_open: Option<(std::path::PathBuf, String)>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -16,11 +18,13 @@ impl Default for State {
             connections: 4,
             notice: None,
             focus_url: true,
+            confirm_open: None,
         }
     }
 }
 impl Browser {
     pub fn downloads_window(&mut self, ctx: &egui::Context) {
+        self.confirm_open_program(ctx);
         if !self.download_ui.open {
             self.download_ui.focus_url = true;
             return;
@@ -52,7 +56,7 @@ impl Browser {
             let mut open_path=None;
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-330.0).max(100.0)).show(ui,|ui|{
                 for job in self.downloads.jobs(){
-                    let progress=job.progress.lock().unwrap().clone();let bytes=job.bytes();
+                    let progress=job.snapshot();let bytes=job.bytes();
                     ui.group(|ui|{
                         ui.horizontal_wrapped(|ui|{ui.strong(&progress.filename);ui.weak(format!("{:?}",progress.phase));});
                         ui.add(egui::Label::new(egui::RichText::new(&job.url).small()).truncate()).on_hover_text(&job.url);
@@ -72,7 +76,10 @@ impl Browser {
                                 }
                                 Phase::Complete=>{if let Some(path)=&progress.path{
                                     if !remote {
-                                        if ui.button("Open file").clicked(){open_path=Some((path.clone(),false));}
+                                        if ui.button("Open file").clicked(){
+                                            if crate::downloads::opens_as_program(path){self.download_ui.confirm_open=Some((path.clone(),job.url.clone()));}
+                                            else{open_path=Some((path.clone(),false));}
+                                        }
                                         if ui.button("Show in folder").clicked(){open_path=Some((path.clone(),true));}
                                     }
                                     if ui.button("Copy saved path").clicked(){ctx.copy_text(path.display().to_string());}
@@ -90,6 +97,42 @@ impl Browser {
         self.download_ui.open = open;
         if start {
             self.begin_download();
+        }
+    }
+    /// Programs and scripts run code when opened; never launch one with a single click.
+    fn confirm_open_program(&mut self, ctx: &egui::Context) {
+        let Some((path, url)) = self.download_ui.confirm_open.clone() else {
+            return;
+        };
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut decision = crate::ux::escape(ctx).then_some(false);
+        egui::Modal::new(egui::Id::unique("confirm-open-download")).show(ctx, |ui| {
+            ui.set_max_width(460.0);
+            ui.heading(format!("Open “{name}”?"));
+            ui.label("This file can run programs or change settings on your computer. Open it only if you trust where it came from.");
+            ui.add(egui::Label::new(egui::RichText::new(format!("Downloaded from {url}")).small()).truncate())
+                .on_hover_text(&url);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    decision = Some(false);
+                }
+                if ui.button("Open anyway").clicked() {
+                    decision = Some(true);
+                }
+            });
+        });
+        match decision {
+            Some(true) => {
+                self.download_ui.confirm_open = None;
+                if let Err(error) = crate::ux::open_path(&path, false) {
+                    self.download_ui.notice = Some(error);
+                }
+            }
+            Some(false) => self.download_ui.confirm_open = None,
+            None => {}
         }
     }
 }
