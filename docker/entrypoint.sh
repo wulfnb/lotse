@@ -117,6 +117,26 @@ if [ -n "${WEGA_TRUSTED_PROXIES:-}" ]; then
     mv -f "$realip.new" "$realip"
 fi
 
+# Optional plain-HTTP listener for a TLS-terminating reverse proxy. The gateway
+# still demands an https:// Origin and sets __Host- (Secure) cookies, so a
+# browser can only sign in through an HTTPS front end, never on this port.
+listener=/run/wega/browser/server-http.conf
+rm -f "$listener"
+if [ -n "${WEGA_HTTP_PORT:-}" ]; then
+    case $WEGA_HTTP_PORT in
+        *[!0-9]*|0*) fail "WEGA_HTTP_PORT: invalid port '$WEGA_HTTP_PORT'" ;;
+    esac
+    # nginx runs as the browser UID without capabilities: no ports below 1024.
+    [ "${#WEGA_HTTP_PORT}" -le 5 ] && [ "$WEGA_HTTP_PORT" -ge 1024 ] && [ "$WEGA_HTTP_PORT" -le 65535 ] &&
+        [ "$WEGA_HTTP_PORT" != 7443 ] || fail 'WEGA_HTTP_PORT must be 1024-65535 and not 7443'
+    printf 'listen %s;\n' "$WEGA_HTTP_PORT" > "$listener.new"
+    chmod 644 "$listener.new"
+    mv -f "$listener.new" "$listener"
+    echo "Plain HTTP on port $WEGA_HTTP_PORT: expose it only to a TLS-terminating reverse proxy" >&2
+    [ -n "${WEGA_TRUSTED_PROXIES:-}" ] ||
+        echo 'WEGA_HTTP_PORT without WEGA_TRUSTED_PROXIES: login rate limits count the proxy, not clients' >&2
+fi
+
 # Uploads: written by the gateway, readable by the browser group, kept outside
 # the private credential directory. Earlier images stored them in /config/auth.
 if [ -d /config/auth/uploads ]; then

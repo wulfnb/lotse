@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Local authentication gateway. Only nginx's HTTPS listener is public.
+"""Local authentication gateway. Only nginx is public: its HTTPS listener, plus
+an optional plain-HTTP one (WEGA_HTTP_PORT) for a TLS-terminating proxy.
 
 The gateway and its WebSocket bridge listen on Unix sockets, never on TCP
 loopback: pages loaded by the browser in this container can open loopback TCP
