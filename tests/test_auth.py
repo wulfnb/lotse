@@ -481,6 +481,23 @@ class ConcurrencyAndTransportTests(AuthHelpers, unittest.TestCase):
         auth.UnixHTTPServer(str(path), auth.Handler).server_close()
         self.assertFalse(path.exists())
 
+    @unittest.skipIf(os.name == 'nt', 'Unix sockets')
+    def test_gateway_queues_a_page_load_of_concurrent_auth_checks(self):
+        # nginx sends one /verify per asset; the viewer loads ~40 modules at once over
+        # HTTP/2, and a refused check fails a module (502 -> 500) and the whole viewer.
+        import socket
+        path = auth.DIRECTORY / 'burst.sock'
+        server = auth.UnixHTTPServer(str(path), auth.Handler)
+        self.addCleanup(server.server_close)
+        clients = []
+        for _ in range(64):
+            client = socket.socket(socket.AF_UNIX)
+            self.addCleanup(client.close)
+            client.setblocking(False)
+            client.connect(str(path))  # Not yet accepted: waits in the listen queue.
+            clients.append(client)
+        self.assertEqual(len(clients), 64)
+
 
 WATCHDOG_SPEC = importlib.util.spec_from_file_location('wega_watchdog', Path(__file__).resolve().parents[1] / 'docker/supervisor-watchdog.py')
 watchdog = importlib.util.module_from_spec(WATCHDOG_SPEC)

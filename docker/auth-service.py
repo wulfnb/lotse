@@ -427,6 +427,9 @@ def refund_attempt(address):
 class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     block_on_close = False
+    # nginx sends one /verify per asset, so a page load arrives as a burst of ~40;
+    # socketserver's default backlog of 5 refuses the rest with EAGAIN.
+    request_queue_size = 128
 
     def __init__(self, path, handler):
         Path(path).unlink(missing_ok=True)
