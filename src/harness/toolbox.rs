@@ -11,6 +11,7 @@ pub struct Test {
     at: Instant,
     pub capture: Option<String>,
     height: f32,
+    page_height: f32,
 }
 impl Test {
     pub fn new() -> Self {
@@ -20,6 +21,7 @@ impl Test {
             at: Instant::now(),
             capture: None,
             height: 0.0,
+            page_height: 0.0,
         }
     }
 }
@@ -134,6 +136,11 @@ impl Browser {
                 rows.iter().any(|r| r.url.ends_with("toolbox.html")),
                 "Main document retained after navigation"
             );
+            // Page height before any toolbox docks. The OS may clamp the requested
+            // window to a small display (1024x643 on macOS CI runners), so later
+            // checks compare against this instead of a fixed pixel count.
+            self.harness.toolbox_test.as_mut().unwrap().page_height =
+                self.chrome.page_rect.height();
             self.tools.network.selected = Some(post.uid);
             self.tools.detail_tab = 2;
             self.tools.active = Tool::Network;
@@ -666,9 +673,11 @@ impl Browser {
         }
         if stage == 38 && elapsed > Duration::from_millis(700) {
             assert!(self.profile_dir.join("detached-inspector.png").exists());
+            let full = self.harness.toolbox_test.as_ref().unwrap().page_height;
             assert!(
-                self.chrome.page_rect.height() > 500.0,
-                "Detached toolbox restores full page height"
+                full > 0.0 && (self.chrome.page_rect.height() - full).abs() < 2.0,
+                "Detached toolbox restores full page height ({} of {full})",
+                self.chrome.page_rect.height()
             );
             self.tools.active = Tool::Network;
             self.tool_stage(39);
