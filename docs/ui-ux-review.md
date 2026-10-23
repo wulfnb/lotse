@@ -2,7 +2,17 @@
 
 Implementation status: all 16 findings now have code changes. See
 [implementation and verification](ui-ux-implementation.md). The observations
-below describe the original pre-change experience.
+below describe the original pre-change experience. The [23 October second-pass
+proposals](ui-ux-proposals.md#implementation-status--23-october-2026) have their own
+implementation status and remaining backlog; the original 16-item completion
+claim does not apply to that newer backlog. Continued implementation now includes
+the address-bar site panel, theme swatches, compact tabs and explicit viewer
+clipboard actions. The third follow-up adds new-tab tiles, About, Network layout
+changes, quality presets and a Windows installer definition; see the implementation
+log for validation limits, particularly the unrun Windows installer checks. The
+fourth follow-up adds exact-origin permission blocks, address host emphasis and
+request-scoped viewer-to-file-picker handoff and a mobile keyboard control;
+live Docker/device checks remain.
 
 The current browser has consistent emerald styling, useful top/sidebar layouts,
 and substantial working developer tools. It still has important gaps in input

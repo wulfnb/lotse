@@ -71,6 +71,18 @@ impl<R: PermissionPort> Permissions<R> {
             false
         }
     }
+    /// Resolve queued requests affected by a changed site setting without touching other sites.
+    pub fn resolve(&mut self, origin: &str, feature: &str, allow: bool) {
+        let mut remaining = VecDeque::new();
+        while let Some((id, queued_origin, queued_feature, responder)) = self.pending.pop_front() {
+            if queued_origin == origin && queued_feature == feature {
+                responder.respond(allow);
+            } else {
+                remaining.push_back((id, queued_origin, queued_feature, responder));
+            }
+        }
+        self.pending = remaining;
+    }
     pub fn clear(&mut self) {
         while let Some((_, _, _, responder)) = self.pending.pop_front() {
             responder.respond(false);

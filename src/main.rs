@@ -13,6 +13,7 @@ mod debug_driver;
 mod debug_model;
 mod debugger_ui;
 mod devtools_ui;
+mod file_handoff;
 use wega::downloads;
 mod downloads_ui;
 mod engine;

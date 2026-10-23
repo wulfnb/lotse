@@ -189,13 +189,27 @@ jobs:
             Copy-Item "README.md" -Destination "dist\wega-windows-x64\"
           }
           Compress-Archive -Path "dist\wega-windows-x64\*" -DestinationPath "dist\Wega-Windows-x64.zip" -Force
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $compiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($compiler) { $iscc = $compiler.Source }
+          else { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          if (!(Test-Path $iscc)) { throw "Inno Setup 6 compiler is required for the Windows installer" }
+          & $iscc packaging\windows\wega.iss
+          if ($LASTEXITCODE -ne 0) { throw "Windows installer compilation failed" }
+      - name: Check per-user install and uninstall
+        shell: pwsh
+        run: scripts\windows-installer-check.ps1
       - name: Launch the packaged executable
         shell: pwsh
         run: scripts\windows-launch-check.ps1 -Directory dist\wega-windows-x64
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-dist
-          path: dist/Wega-Windows-x64.zip
+          path: |
+            dist/Wega-Windows-x64.zip
+            dist/Wega-Windows-x64-Setup.exe
 
   publish-release:
     name: Publish GitHub Test Release

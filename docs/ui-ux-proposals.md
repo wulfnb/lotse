@@ -3,11 +3,43 @@
 This is a second design pass after the [22 October review](ui-ux-review.md),
 whose 16 findings are implemented. It focuses on what that review did not cover
 in depth: the **Docker web viewer** people use every day, the **Windows build**,
-and how the desktop chrome looks and reads today. It is a proposal; no
-application code was changed for it.
+and how the desktop chrome looks and reads today. The findings below preserve
+the proposal baseline; the implementation status tracks subsequent changes.
 
 P1 blocks or breaks a common task. P2 is real friction or something that looks
 unfinished. P3 is polish.
+
+## Implementation status — 23 October 2026
+
+These follow-ups implement the first priority group and several related chrome
+improvements. It does **not** mark the whole proposal complete. See
+[implementation and verification](ui-ux-implementation.md#23-october-follow-up).
+Changes are uncommitted on `feature/windows-gateway-and-design-docs`.
+
+| Item | Current status |
+| --- | --- |
+| A1 | Implemented: visible connection card, 15-second deadline, immediate retry, automatic 1/2/5/10-second backoff, session-expiry redirect, classic bootstrap for module failure. Unit checks cover silent sockets and missing modules; a real container stop/restart through the production proxy remains to test. |
+| A2 | Implemented floating controls, full-height remote viewport, View/Account menus, idle hiding and Alt+Shift+V focus shortcut. Real touch and fullscreen behavior still need device validation; the two-step keyboard acceptance criterion is not yet certified. |
+| A3 | Implemented request-scoped upload-to-picker IPC, authenticated chooser polling, direct file selection/cancellation and drop-on-screen handoff. Native Servo selection, gateway guards, browser/auth UID access and viewer regressions checked separately; full live Docker engine/device validation remains. |
+| A6 | Added a virtual-keyboard control using the public noVNC key API, Unicode edits/deletion/navigation/modifiers, coarse-pointer targets and a dismissible first-touch hint. Existing noVNC two-finger scrolling and remote-page pinch zoom are retained. Real iOS/Android keyboard/IME/gesture validation remains; viewport pinch-to-pan/zoom is not claimed. |
+| A5 | Sharp/Fast presets and remembered device preference implemented. Auto follows Network Information hints when available, falling back to balanced quality. Frame-queue-driven adaptation remains pending. |
+| A4 | Added user-gesture paste handling and a remote-copy offer with explicit Copy here; permission/API failures open selectable text. Regression checks pass; shortcut delivery through a live noVNC canvas still needs validation. |
+| A7 | Implemented mint sign-in action, password visibility control, Caps Lock warning and plain-language 401/429 errors. |
+| B1 | Implemented effective appearance on view creation and live updates to every loaded view. Native theme suite checks website `matchMedia` for all six themes. Auto still needs a real OS appearance-toggle check. |
+| B2 | Implemented telemetry hidden by default; persistent Advanced setting enables CPU/RAM. Engine strings removed from the ordinary footer. About Wega is now available from the browser menu. |
+| B3 | Partial: address-bar connection button, HTTP warning, anchored site panel, connection explanation and confirmed current-site clearing. Exact-origin Block/Ask permission controls and full-host address emphasis are implemented. Remembered grants and revocation of existing device access are not provided; the callback does not identify requesting-frame origin. |
+| B4 | Implemented the proposed modal-sheet alternative: centered, constrained width, dimmed backdrop, Close/Escape/backdrop dismissal and focus restoration. It remains a native settings surface. |
+| B5 | Implemented readable storage categories, site-first rows, destructive Remove last, and “Cookies on this site”. Site data now opens below the address bar from the connection control or existing menu. |
+| B6 | Partial: simple theme names and selected tab-layout controls. Three-color swatches are now included; explicit Glass Light/Dark choices are hidden when no native backdrop is available (Auto retains its opaque fallback). |
+| B7 | Compact brand and contextual close glyphs implemented, including keyboard focus. New tab already uses a full-width sidebar row and 36-point top-strip target. The duplicate sidebar bookmark action is removed; History remains accessible. |
+| B8 | New-tab shortcut grid combines deduplicated bookmarks/recent pages (up to eight), saved favicons/fallbacks and five recent links. Duplicate navigation removed; search requests HTML autofocus. Actual native keyboard focus and most-visited ranking still need follow-up. |
+| B9 | Library fallback icons implemented. Network details move below the table in narrow docks; default columns fit available width, user-sized columns retain scrolling, scrollbars remain visible, and filter syntax is in a tooltip. |
+| C1 | ANGLE, packaged DLLs, embedded icon and Windows launch CI are already present in this branch. No branch merge was performed; real-PC validation remains required. |
+| C2 | Partial fallback: download-page/README disclosure and a startup warning in Windows builds without media. Bundled Windows playback and per-element messaging remain pending. |
+| C3 | Per-user Inno installer, Start menu/uninstall entries, browser capability registration and Windows Default apps launcher added. CI builds and checks install/uninstall. Compilation/runtime validation awaits Windows CI; signing, macOS default-browser integration and already-running-instance URL handoff remain open. |
+| C4 | Implemented confirmed URI dispatch with Windows ShellExecuteW and Linux xdg-open; macOS open is retained. Windows/Linux runtime checks remain required. |
+| C5 | Pending: platform backdrop support and theme filtering. |
+| D | Recorded as an observed rendering gap in the capability matrix; CSS-mask diagnosis is unconfirmed. |
 
 ## Evidence
 
@@ -245,9 +277,9 @@ Browsing.
 **Observed:** `wega.exe` panicked at start with *Reading GL_VERSION failed*, and
 Explorer showed a generic icon.
 
-**Status:** fixed on branch `feature/windows-angle-and-icon` (ANGLE rendering,
-shipped DLLs, embedded icon, and a CI job that launches the browser on Windows).
-Needs a merge and a test on a real PC.
+**Status:** ANGLE rendering, shipped DLLs, embedded icon and Windows launch CI
+are present in the current checkout. No merge is needed for these source changes
+in this branch. A fresh Windows build and real-PC test remain required.
 
 ### C2. P1 — No video or audio on Windows
 

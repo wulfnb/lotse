@@ -576,3 +576,47 @@ class SupervisorWatchdogTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ChooserTests(AuthHelpers, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.chooser = Path(self.temporary.name) / 'chooser'
+        self.chooser.mkdir()
+        patcher = patch.object(auth, 'CHOOSER', self.chooser)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def publish(self, **changes):
+        value = dict(id='a'*32, expires=int(time.time())+60, multiple=False, origin='https://example.test', extensions=['txt'])
+        value.update(changes)
+        (self.chooser / 'current.json').write_text(json.dumps(value))
+        return value
+
+    def test_chooser_requires_session_csrf_origin_and_current_request(self):
+        self.publish()
+        self.assertEqual(self.request('/auth/chooser')[0],401)
+        token=auth.new_session();csrf=auth.SESSIONS[token]['csrf']
+        self.assertEqual(self.request('/auth/chooser',token=token)[1]['request']['id'],'a'*32)
+        data={'id':'a'*32,'paths':[]}
+        self.assertEqual(self.request('/auth/chooser',data,token,'wrong')[0],403)
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf,origin='https://evil.test')[0],403)
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf)[0],200)
+        self.assertEqual(json.loads((self.chooser/('reply-'+'a'*32+'.json')).read_text())['paths'],[])
+        self.assertIsNone(auth.chooser_request())
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf)[0],400)
+        self.assertEqual(self.request('/auth/chooser',dict(data,id='b'*32),token,csrf)[0],400)
+
+    def test_only_uploaded_files_can_reach_the_picker(self):
+        self.publish()
+        path=auth.save_upload('example.txt',b'file')
+        for paths in [[str(self.chooser/'current.json')],['/etc/passwd'],[None],[str(path),str(path)],'invalid']:
+            with self.assertRaises(ValueError):auth.choose_uploaded_files({'id':'a'*32,'paths':paths})
+        auth.choose_uploaded_files({'id':'a'*32,'paths':[str(path)]})
+        self.publish(id='b'*32,multiple=True)
+        auth.choose_uploaded_files({'id':'b'*32,'paths':[str(path),str(path)]})
+        for changes in [dict(expires=0),dict(id='../evil'),dict(multiple='yes'),dict(origin=None),dict(extensions=['x'*257])]:
+            self.publish(**changes);self.assertIsNone(auth.chooser_request())
+        (self.chooser/'current.json').write_text('invalid')
+        self.assertIsNone(auth.chooser_request())
+        (self.chooser/'current.json').unlink()
+        self.assertIsNone(auth.chooser_request())

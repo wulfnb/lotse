@@ -393,16 +393,9 @@ impl Browser {
                 let shown = panel.show(ui, |ui| {
                     ui.horizontal(|ui| {
                         brand_icon(ui);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(crate::brand::NAME).strong().size(15.0));
-                            ui.label(
-                                RichText::new("Your space on the web")
-                                    .size(11.0)
-                                    .color(colors.muted),
-                            );
-                        });
+                        ui.label(RichText::new(crate::brand::NAME).strong().size(15.0));
                     });
-                    ui.add_space(16.0);
+                    ui.add_space(6.0);
                     let height = (ui.available_height() - 75.0).max(80.0);
                     egui::ScrollArea::vertical()
                         .max_height(height)
@@ -412,11 +405,6 @@ impl Browser {
                         ui.horizontal(|ui| {
                             if icon(ui, "☰", "Switch to tabs on top").clicked() {
                                 self.toggle_layout();
-                            }
-                            if icon(ui, "☆", "Bookmarks").clicked() {
-                                self.chrome.show_bookmarks = !self.chrome.show_bookmarks;
-                                self.chrome.show_history = false;
-                                self.chrome.library_query.clear();
                             }
                             if icon(ui, "◷", "History").clicked() {
                                 self.chrome.show_history = !self.chrome.show_history;
@@ -429,7 +417,7 @@ impl Browser {
                         });
                         ui.label(
                             RichText::new(format!(
-                                "{} {} · Servo 0.7",
+                                "{} {}",
                                 self.session().tabs().len(),
                                 if self.session().tabs().len() == 1 {
                                     "tab"
@@ -492,7 +480,7 @@ impl Browser {
                                     let status = self.view().status_text().unwrap_or_else(|| {
                                         if self.view().load_status() == servo::LoadStatus::Complete
                                         {
-                                            "Servo · WebRender".into()
+                                            String::new()
                                         } else {
                                             "Loading page…".into()
                                         }
@@ -522,13 +510,15 @@ impl Browser {
                             if ui.small_button("−").clicked() {
                                 self.zoom(1.0 / 1.1);
                             }
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new(self.resources.label())
-                                    .size(11.0)
-                                    .color(colors.muted),
-                            )
-                            .on_hover_text(self.resources.description());
+                            if self.profile().policy.show_performance {
+                                ui.add_space(10.0);
+                                ui.label(
+                                    RichText::new(self.resources.label())
+                                        .size(11.0)
+                                        .color(colors.muted),
+                                )
+                                .on_hover_text(self.resources.description());
+                            }
                         });
                     });
                 });
@@ -613,31 +603,37 @@ impl Browser {
             }
             let url = self.view().url();
             let protocol = url.as_ref().map(|u| u.scheme()).unwrap_or("");
-            ui.label(
-                RichText::new(match protocol {
-                    "https" => "HTTPS",
-                    "http" => "HTTP",
-                    "file" => "FILE",
-                    _ => "PAGE",
-                })
-                .size(10.0)
-                .color(colors.muted),
-            )
-            .on_hover_text(match protocol {
-                "https" => "HTTPS connection. Certificates are validated by Servo.",
-                "http" => "This connection is not encrypted.",
-                _ => "Local or internal document.",
-            });
+            let security = ui.button(RichText::new(match protocol {
+                "https" => "🔒", "http" => "⚠ Not secure", "wega" => "Wega", "file" => "File", _ => "Site",
+            }).color(if protocol == "http" { colors.amber } else { colors.text }))
+                .on_hover_text("Connection and site data");
+            security.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), "Connection and site data"));
+            ui.ctx().data_mut(|data| data.insert_temp(Id::unique("site-panel-anchor"), security.rect.left_bottom()));
+            if security.clicked() { self.refresh_site_data(); self.features.site_info = !self.features.site_info; }
             let width = (ui.available_width() - 126.0).max(100.0);
             let hint = match self.profile().policy.search_engine {
                 wega::model::SearchEngine::Custom => "Search or enter address".to_owned(),
                 engine => format!("Search {} or enter address", engine.name()),
+            };
+            let editing = self.chrome.focus_address || ui.memory(|memory| memory.has_focus(Id::unique("address")));
+            let mut address_layout = |ui: &Ui, buffer: &dyn egui::TextBuffer, _: f32| {
+                let text=buffer.as_str();
+                let mut job=egui::text::LayoutJob::default();
+                let font=egui::TextStyle::Body.resolve(ui.style());
+                if let Some(range)=(!editing).then(|| wega::model::address_host_range(text)).flatten() {
+                    for (part,color) in [(&text[..range.start],colors.muted),(&text[range.clone()],colors.text),(&text[range.end..],colors.muted)] {
+                        job.append(part,0.0,egui::TextFormat{font_id:font.clone(),color,..Default::default()});
+                    }
+                } else {job.append(text,0.0,egui::TextFormat{font_id:font,color:colors.text,..Default::default()});}
+                job.wrap.max_width=f32::INFINITY;
+                ui.fonts_mut(|fonts| fonts.layout_job(job))
             };
             let response = ui.add_sized(
                 [width, 34.0],
                 egui::TextEdit::singleline(&mut self.chrome.address)
                     .id(Id::unique("address"))
                     .hint_text(hint)
+                    .layouter(&mut address_layout)
                     .frame(
                         Frame::new()
                             .fill(colors.inset)
@@ -716,6 +712,7 @@ impl Browser {
                 ui.separator();
                 ui.menu_button("Appearance", |ui| {
                     for theme in crate::theme::Theme::ALL {
+                        if self.native_theme.is_none() && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
                         if ui
                             .selectable_label(self.profile().theme == theme, theme.name())
                             .clicked()
@@ -754,6 +751,7 @@ impl Browser {
                     ui.close();
                 }
                 if ui.button("Browser settings").clicked() {self.features.settings=true;ui.close();}
+                if ui.button("About Wega").clicked(){self.navigate("wega://about");ui.close();}
                 if ui.button("Site information").clicked() {self.refresh_site_data();self.features.site_info=true;ui.close();}
                 if ui.button("Save page as image").clicked() {self.screenshot_page();ui.close();}
                 if ui.button("Reader view").clicked() {self.view().evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
@@ -890,17 +888,23 @@ impl Browser {
             if close.hovered() || close.has_focus() {
                 ui.painter().rect_filled(close_rect, 7, colors.hover);
             }
-            // The close glyph stays quieter than the title until it is targeted.
-            paint_icon(
-                ui.painter(),
-                close_rect.center(),
-                "×",
-                if close.hovered() {
-                    colors.text
-                } else {
-                    colors.muted
-                },
-            );
+            if selected
+                || response.hovered()
+                || response.has_focus()
+                || close.hovered()
+                || close.has_focus()
+            {
+                paint_icon(
+                    ui.painter(),
+                    close_rect.center(),
+                    "×",
+                    if close.hovered() {
+                        colors.text
+                    } else {
+                        colors.muted
+                    },
+                );
+            }
             let closing = close.on_hover_text("Close tab").clicked();
             let response = response.on_hover_text(format!(
                 "{}\n{}\n{}Drag to reorder · Right-click for tab options",
@@ -1166,6 +1170,14 @@ impl Browser {
                                 icon_rect,
                                 egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
                                 egui::Color32::WHITE,
+                            );
+                        }
+                        if !self.favicons.contains_key(&entry.url) {
+                            paint_icon(
+                                ui.painter(),
+                                egui::pos2(rect.left() + 18.0, rect.top() + 18.0),
+                                "▤",
+                                colors.muted,
                             );
                         }
                         let text_rect = egui::Rect::from_min_max(
@@ -1548,6 +1560,60 @@ impl Browser {
                 }
             }
             servo::EmbedderControl::FilePicker(picker) => {
+                if fresh {
+                    self.chrome.file_handoff = None;
+                    if let Some(directory) = std::env::var_os("WEGA_FILE_HANDOFF_DIR") {
+                        let uploads = std::env::var_os("BROWSER_UPLOAD_DIR")
+                            .map(std::path::PathBuf::from)
+                            .unwrap_or_else(|| "/config/uploads".into());
+                        match crate::file_handoff::Request::new(
+                            std::path::Path::new(&directory),
+                            &uploads,
+                            picker.allow_select_multiple(),
+                            url::Url::parse(&title)
+                                .map(|url| url.origin().ascii_serialization())
+                                .unwrap_or_else(|_| "Page".into()),
+                            picker
+                                .filter_patterns()
+                                .iter()
+                                .filter(|pattern| pattern.0.len() <= 256)
+                                .take(64)
+                                .map(|pattern| pattern.0.clone())
+                                .collect(),
+                        ) {
+                            Ok(request) => self.chrome.file_handoff = Some(request),
+                            Err(error) => {
+                                self.chrome.file_error = Some(format!(
+                                    "Viewer handoff unavailable: {error}. Use path entry."
+                                ))
+                            }
+                        }
+                    }
+                }
+                let remote = self
+                    .chrome
+                    .file_handoff
+                    .as_ref()
+                    .map(|request| request.poll());
+                if self.chrome.file_handoff.is_some() {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                }
+                let mut remote_answer = None;
+                match remote {
+                    Some(Ok(Some(paths))) => {
+                        self.chrome.file_paths = paths
+                            .iter()
+                            .map(|path| path.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        remote_answer = Some(!paths.is_empty());
+                    }
+                    Some(Err(error)) => {
+                        self.chrome.file_error = Some(error);
+                        self.chrome.file_handoff = None;
+                    }
+                    _ => {}
+                }
                 let mut answer = if cancel {
                     Some(false)
                 } else if submit {
@@ -1555,12 +1621,15 @@ impl Browser {
                 } else {
                     None
                 };
+                if remote_answer.is_some() {
+                    answer = remote_answer;
+                }
                 egui::Modal::new(Id::unique("file_picker")).show(ctx, |ui| {
                     ui.set_max_width((ctx.content_rect().width() - 48.0).clamp(250.0, 520.0));
                     ui.heading("Choose file for website");
                     ui.label(shorten(&title, 80));
                     if std::env::var_os("BROWSER_DOWNLOAD_DIR").is_some() {
-                        ui.label("Use Upload in the web viewer to send a file from this computer, then paste its remote path here.");
+                        ui.label("Choose from this computer in the web viewer to upload directly. Upload and path entry remain available as a fallback.");
                     } else if ui.button("Browse files…").clicked() {
                         let mut dialog = rfd::FileDialog::new().set_parent(self.window.as_ref()).set_title("Choose file for website");
                         let extensions: Vec<_> = picker.filter_patterns().iter().map(|p| p.0.as_str()).collect();

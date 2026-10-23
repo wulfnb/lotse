@@ -83,6 +83,24 @@ def main():
         assert docker('exec', '--user', 'browser', container, 'python3', '-c',
                       'from pathlib import Path; import sys; assert Path(sys.argv[1]).read_bytes()==b"private binary\\x00content"; print("readable")',
                       path) == 'readable'
+        # A real browser-UID request must be readable by the gateway, and its
+        # reply must be readable by the browser without exposing auth secrets.
+        request_id = uuid.uuid4().hex
+        docker('exec', '--user', 'browser', container, 'python3', '-c',
+               'import json,time,pathlib,sys; p=pathlib.Path("/run/wega/chooser/current.json"); p.write_text(json.dumps(dict(id=sys.argv[1],expires=int(time.time())+60,multiple=False,origin="https://example.test",extensions=["bin"]))); p.chmod(0o640)', request_id)
+        assert request('/auth/chooser')[0] == 401
+        chooser = json.loads(request('/auth/chooser', headers=session)[1])['request']
+        assert chooser['id'] == request_id
+        chooser_headers = {**origin, **session, 'Content-Type': 'application/json', 'X-CSRF-Token': account['csrf']}
+        selection = json.dumps({'id': request_id, 'paths': [path]}).encode()
+        assert request('/auth/chooser', selection, {**chooser_headers, 'X-CSRF-Token': 'invalid'})[0] == 403
+        assert request('/auth/chooser', selection, {**chooser_headers, 'Origin': 'https://elsewhere.invalid'})[0] == 403
+        assert request('/auth/chooser', json.dumps({'id': request_id, 'paths': ['/config/auth/key']}).encode(), chooser_headers)[0] == 400
+        assert request('/auth/chooser', selection, chooser_headers)[0] == 200
+        selected = docker('exec', '--user', 'browser', container, 'python3', '-c',
+                          'import json,pathlib,sys; print(json.loads(pathlib.Path("/run/wega/chooser/reply-"+sys.argv[1]+".json").read_text())["paths"][0])', request_id)
+        assert selected == path
+        assert request('/chooser/current.json', headers=session)[0] != 200
         assert request('/auth/uploads/')[0] != 200
         assert request('/index.html')[0] == 401
         # The gateway's secrets are not readable by the browser UID.
@@ -90,9 +108,12 @@ def main():
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
         page = request('/index.html', headers=session)[1]
         assert b'id="upload"' in page and b'id="viewport-mode"' in page
+        assert b'/bootstrap.js' in page and b'id="connection-card"' in page
+        bootstrap = request('/bootstrap.js', headers=session)
+        assert bootstrap[0] == 200 and b"import('/viewer.js')" in bootstrap[1]
         script = request('/viewer.js', headers=session)[1]
         assert b'/auth/upload' in script and b'resizeSession' in script
-        print('PASS: hardened runtime, TCP listeners limited to HTTPS, private gateway secrets, nginx syntax, authentication, CSRF/origin/size guards, private file handoff and current viewer assets')
+        print('PASS: hardened runtime, TCP listeners limited to HTTPS, private gateway secrets, nginx syntax, authentication, CSRF/origin/size guards, private file handoff, chooser IPC UID permissions and current viewer assets')
     finally:
         subprocess.run(['docker', 'rm', '-f', container], check=True, stdout=subprocess.DEVNULL)
 

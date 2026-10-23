@@ -326,6 +326,12 @@ impl Browser {
                 .as_ref()
                 .map(|path| crate::capture::Capture::new(path.clone())),
         };
+        #[cfg(all(target_os = "windows", not(feature = "media")))]
+        browser.notify(
+            crate::ux::Severity::Warning,
+            "Video and audio are not available in this build.",
+            None,
+        );
         let restore = options.url.is_none() && !options.test_mode();
         let urls = if (options.smoke_test || options.theme_test || options.capabilities_test)
             && options.url.is_none()
@@ -494,7 +500,17 @@ impl Browser {
             builder = builder.url(url.clone());
         }
         let view = builder.build();
-        view.notify_theme_change(servo::Theme::Dark);
+        view.notify_theme_change(
+            if self
+                .profile()
+                .theme
+                .dark(self.window.theme() != Some(winit::window::Theme::Light))
+            {
+                servo::Theme::Dark
+            } else {
+                servo::Theme::Light
+            },
+        );
         Live { view, surface }
     }
 
@@ -813,6 +829,11 @@ impl Browser {
             "document.getElementById('wega-theme')?.replaceChildren(document.createTextNode({css}))"
         );
         for view in self.session.tabs().iter().filter_map(Tab::view) {
+            view.notify_theme_change(if dark {
+                servo::Theme::Dark
+            } else {
+                servo::Theme::Light
+            });
             if view.url().is_some_and(|u| u.scheme() == "wega") {
                 view.evaluate_javascript(script.clone(), |_| {});
             }
@@ -1039,11 +1060,16 @@ impl Browser {
                     self.select_tab(index);
                 }
                 Event::Permission(origin, request) => {
-                    self.dialogs.permissions.push(
-                        origin,
-                        format!("{:?}", request.feature()),
-                        crate::permission_adapter::Permission(request),
-                    );
+                    let feature = format!("{:?}", request.feature());
+                    if self.profile().policy.permission_blocked(&origin, &feature) {
+                        request.deny();
+                    } else {
+                        self.dialogs.permissions.push(
+                            origin,
+                            feature,
+                            crate::permission_adapter::Permission(request),
+                        );
+                    }
                 }
                 Event::Authentication(request) => {
                     self.dialogs.push_authentication(request);
@@ -1121,6 +1147,8 @@ impl Browser {
         }
         let url = self.tab().url();
         if url != self.chrome.last_url {
+            self.features.site_info = false;
+            self.features.cookies.clear();
             self.chrome.last_url = url.clone();
             // Do not replace an address while the user is typing.
             let editing = self.gui.as_ref().is_some_and(|g| {
@@ -1275,7 +1303,8 @@ impl Browser {
     }
 
     pub(crate) fn modal(&self) -> bool {
-        self.features.clear_data
+        self.features.settings
+            || self.features.clear_data
             || self.features.delete_site.is_some()
             || self.chrome.confirm_clear_history
             || !self.features.bluetooth.is_empty()

@@ -97,6 +97,9 @@ mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 chown root:root /run/wega && chmod 755 /run/wega
 chown browser:wega-ipc /run/wega/vnc && chmod 2750 /run/wega/vnc
 chown wega-auth:wega-ipc /run/wega/auth && chmod 2750 /run/wega/auth
+mkdir -p /run/wega/chooser
+chown browser:wega-ipc /run/wega/chooser
+chmod 2770 /run/wega/chooser
 setup_tls
 
 # Optional reverse proxies whose X-Forwarded-For is trusted for rate limiting.

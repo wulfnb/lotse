@@ -29,6 +29,7 @@ from cryptography.fernet import Fernet
 
 DIRECTORY = Path(os.environ.get('BROWSER_AUTH_DIR', '/config/auth'))
 UPLOADS = Path(os.environ.get('BROWSER_UPLOAD_DIR', '/config/uploads'))
+CHOOSER = Path(os.environ.get('WEGA_FILE_HANDOFF_DIR', '/run/wega/chooser'))
 AUTH_SOCKET = os.environ.get('BROWSER_AUTH_SOCKET', '/run/wega/auth/auth.sock')
 WEBSOCKET_SOCKET = os.environ.get('BROWSER_WEBSOCKET_SOCKET', '/run/wega/auth/websocket.sock')
 VNC_SOCKET = os.environ.get('BROWSER_VNC_SOCKET', '/run/wega/vnc/rfb.sock')
@@ -277,6 +278,62 @@ def save_upload(encoded_name, body):
     return destination
 
 
+def chooser_request():
+    try:
+        raw = (CHOOSER / 'current.json').read_bytes()
+        if len(raw) > 8192:
+            return None
+        request = json.loads(raw)
+        if not isinstance(request, dict) or not re.fullmatch(r'[0-9a-f]{32}', request.get('id', '')):
+            return None
+        if not isinstance(request.get('expires'), int) or not time.time() <= request['expires'] <= time.time() + 600:
+            return None
+        if not isinstance(request.get('multiple'), bool) or not isinstance(request.get('origin'), str):
+            return None
+        if (CHOOSER / ('accepted-' + request['id'])).exists():
+            return None
+        extensions = request.get('extensions')
+        if not isinstance(extensions, list) or not all(isinstance(item, str) and len(item) <= 256 for item in extensions):
+            return None
+        return request
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def choose_uploaded_files(data):
+    request = chooser_request()
+    if not request or data.get('id') != request['id']:
+        raise ValueError('This file chooser has closed or expired. Reopen it in the browser.')
+    paths = data.get('paths')
+    if not isinstance(paths, list) or len(paths) > 32 or (not request['multiple'] and len(paths) > 1):
+        raise ValueError('Invalid number of selected files.')
+    root = UPLOADS.resolve()
+    selected = []
+    for value in paths:
+        if not isinstance(value, str):
+            raise ValueError('Invalid uploaded file path.')
+        path = Path(value).resolve()
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            raise ValueError('Only uploaded files can be selected.') from None
+        if len(relative.parts) != 2 or not relative.parts[0].startswith('file-') or not path.is_file():
+            raise ValueError('The uploaded file is unavailable.')
+        selected.append(str(path))
+    # First terminal action wins: a late upload cannot overwrite cancellation.
+    marker = CHOOSER / ('accepted-' + request['id'])
+    try:
+        fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o640)
+    except FileExistsError:
+        raise ValueError('This file chooser was already answered.') from None
+    os.close(fd)
+    try:
+        atomic(CHOOSER / ('reply-' + request['id'] + '.json'), json.dumps({'id': request['id'], 'paths': selected}).encode(), 0o640)
+    except BaseException:
+        marker.unlink(missing_ok=True)
+        raise
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *_):
         pass  # Never log headers, bodies or credentials.
@@ -297,6 +354,10 @@ class Handler(BaseHTTPRequestHandler):
             _, active = session(self)
             if self.path == '/verify':
                 return self.reply(204 if active else 401)
+            if self.path == '/auth/chooser':
+                if not active:
+                    return self.reply(401, {'error': 'Please sign in.'})
+                return self.reply(200, {'request': chooser_request()})
             if self.path == '/auth/account':
                 if not active:
                     return self.reply(401, {'error': 'Please sign in.'})
@@ -335,7 +396,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(415, {'error': 'JSON required.'})
         try:
             length = int(self.headers.get('Content-Length', '0'))
-            if not 0 < length <= 4096:
+            if not 0 < length <= (16384 if self.path == '/auth/chooser' else 4096):
                 return self.reply(413, {'error': 'Invalid request size.'})
             data = json.loads(self.rfile.read(length))
             if not isinstance(data, dict):
@@ -358,6 +419,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not hmac.compare_digest(self.headers.get('X-CSRF-Token', '').encode(), active['csrf'].encode()):
                     refund_attempt(address)
                     return self.reply(403, {'error': 'Please reopen account settings and try again.'})
+                if self.path == '/auth/chooser':
+                    refund_attempt(address)
+                    try:
+                        choose_uploaded_files(data)
+                    except (ValueError, OSError) as error:
+                        return self.reply(400, {'error': str(error)})
+                    return self.reply(200, {'ok': True})
                 if self.path == '/auth/logout':
                     refund_attempt(address)
                     SESSIONS.clear()
