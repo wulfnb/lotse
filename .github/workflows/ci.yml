@@ -3,8 +3,6 @@ name: CI
 on:
   workflow_call:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -167,6 +165,15 @@ jobs:
           docker build --build-arg WEGA_BASE=wega-shell-base:ci -f docker/coverage.Dockerfile -t wega-coverage-tools:ci .
           mkdir -p target/coverage/shell
           docker run --rm -v "$PWD:/source:ro" -v "$PWD/target/coverage/shell:/output" wega-coverage-tools:ci /usr/bin/python3 /source/tests/shell_contracts.py --source /source --output /output
+      # The collector runs as root and mkdtemp creates private 0700 directories.
+      # Restore runner access even when collection fails so partial reports upload.
+      - name: Make shell coverage artifacts readable by the runner
+        if: always()
+        run: |
+          if [ -d target/coverage/shell ]; then
+            sudo chown -R "$(id -u):$(id -g)" target/coverage/shell
+            chmod -R u+rwX target/coverage/shell
+          fi
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         if: always()
         with:
