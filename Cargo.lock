@@ -4753,6 +4753,8 @@ checksum = "d5892d91814b6681a2406067efec53abe9ba4fe8748dcd99e4f5a96a99a05ac0"
 dependencies = [
  "bindgen",
  "cc",
+ "gl_generator",
+ "libz-sys",
  "walkdir",
 ]
 
@@ -7090,6 +7092,7 @@ dependencies = [
  "ipc-channel",
  "keyboard-types",
  "log",
+ "mozangle",
  "parking_lot",
  "rustc-hash",
  "serde",
@@ -10547,6 +10550,7 @@ dependencies = [
  "url",
  "webdriver",
  "winit",
+ "winresource",
 ]
 
 [[package]]
@@ -10846,6 +10850,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "winresource"
+version = "0.1.31"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0986a8b1d586b7d3e4fe3d9ea39fb451ae22869dcea4aa109d287a374d866087"
+dependencies = [
+ "toml 1.1.8+spec-1.1.0",
+ "version_check",
 ]
 
 [[package]]

@@ -172,6 +172,14 @@ jobs:
             throw "Windows browser executable is missing; refusing an incomplete release"
           }
           Copy-Item "target\release\wega.exe" -Destination "dist\wega-windows-x64\"
+          # wega.exe links ANGLE (libEGL/libGLESv2) dynamically; without them it cannot start.
+          foreach ($dll in "libEGL.dll", "libGLESv2.dll") {
+            $built = Get-ChildItem "target\release\build\mozangle-*\out\$dll" | Select-Object -First 1
+            if (!$built) {
+              throw "$dll is missing; refusing a release that cannot start"
+            }
+            Copy-Item $built.FullName -Destination "dist\wega-windows-x64\"
+          }
           foreach ($notice in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.html") {
             if (!(Test-Path "dist\wega-windows-x64\$notice")) {
               throw "$notice is missing; refusing a release without license notices"
@@ -181,6 +189,9 @@ jobs:
             Copy-Item "README.md" -Destination "dist\wega-windows-x64\"
           }
           Compress-Archive -Path "dist\wega-windows-x64\*" -DestinationPath "dist\Wega-Windows-x64.zip" -Force
+      - name: Launch the packaged executable
+        shell: pwsh
+        run: scripts\windows-launch-check.ps1 -Directory dist\wega-windows-x64
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-dist
