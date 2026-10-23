@@ -110,7 +110,10 @@ fn address_schemes_local_files_and_invalid_hosts() {
         "file:///tmp/a%20b.html"
     );
     #[cfg(windows)]
-    assert!(resolve_address("/tmp/a b.html").is_err());
+    assert_eq!(
+        resolve_address("/tmp/a b.html").unwrap(),
+        crate::model::Policy::default().search_url("/tmp/a b.html")
+    );
     assert!(resolve_address("about:blank").is_ok());
     assert!(resolve_address("about:config").is_err());
     assert!(resolve_address("https://[").is_err());
