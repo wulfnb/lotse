@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain
@@ -30,7 +30,7 @@ jobs:
         run: cargo fmt --check
       - name: Core lints
         run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
       - name: JavaScript line coverage (100% required)
@@ -45,7 +45,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain
@@ -56,7 +56,7 @@ jobs:
           shared-key: "wega-core-${{ matrix.os }}"
       - name: Core unit tests
         run: cargo test --locked --no-default-features --lib
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Install Python dev dependencies
@@ -74,7 +74,7 @@ jobs:
       - name: Core platform line measurement
         if: runner.os != 'Linux'
         run: python scripts/desktop-coverage.py --core-only --output target/coverage/builds/${{ runner.os }}-core
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: core-coverage-${{ runner.os }}
@@ -90,7 +90,7 @@ jobs:
       HOMEBREW_NO_AUTO_UPDATE: 1
       HOMEBREW_NO_INSTALL_CLEANUP: 1
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - run: rustup show active-toolchain
@@ -103,11 +103,11 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Harness lints
         run: cargo clippy --locked --all-targets --features test-harness -- -D warnings
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26'
       - name: JavaScript line coverage
@@ -124,7 +124,7 @@ jobs:
         run: python scripts/native-tests.py --suite all
       - name: Whole-project completeness inventory
         run: python scripts/coverage-inventory.py
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: desktop-coverage-macos
@@ -140,7 +140,7 @@ jobs:
       COMPOSE_FILE: compose.quality.yaml
       COMPOSE_PROJECT_NAME: wega-ci-docker
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Generate disposable test credentials
@@ -174,7 +174,7 @@ jobs:
             sudo chown -R "$(id -u):$(id -g)" target/coverage/shell
             chmod -R u+rwX target/coverage/shell
           fi
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: shell-coverage-linux
@@ -182,7 +182,7 @@ jobs:
       - name: Collect container logs on failure
         if: always()
         run: docker compose logs --no-color > docker-ci.log
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: docker-ci-logs
