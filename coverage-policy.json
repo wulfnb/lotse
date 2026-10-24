@@ -10,7 +10,9 @@
     "scripts/**/*.py",
     "scripts/**/*.sh",
     "scripts/**/*.rs",
-    "scripts/**/*.ps1"
+    "scripts/**/*.ps1",
+    "engines/**/*.rs",
+    "engines/**/*.js"
   ],
   "test_only": [
     "src/*_tests.rs",
@@ -32,7 +34,8 @@
     "scripts/docker-ux-test.py",
     "scripts/coverage-rustc.rs",
     "scripts/windows-launch-check.ps1",
-    "scripts/windows-installer-check.ps1"
+    "scripts/windows-installer-check.ps1",
+    "engines/wega/tests/*.rs"
   ],
   "declaration_only": [
     "src/lib.rs",

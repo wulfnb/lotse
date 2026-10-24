@@ -96,9 +96,28 @@ impl Browser {
         command: Command<webdriver::command::VoidWebDriverExtensionCommand>,
         reply: Sender<WebDriverResult<Response>>,
     ) {
+        if self.is_wega()
+            && !matches!(
+                &command,
+                Command::Status
+                    | Command::NewSession(_)
+                    | Command::DeleteSession
+                    | Command::GetWindowHandle
+                    | Command::GetWindowHandles
+                    | Command::SwitchToWindow(_)
+                    | Command::GetCurrentUrl
+                    | Command::GetTitle
+            )
+        {
+            let _ = reply.send(Err(error(
+                ErrorStatus::UnsupportedOperation,
+                "This WebDriver page operation requires Servo. The Wega engine is experimental.",
+            )));
+            return;
+        }
         let result = match command {
             Command::Status => {
-                let ready = self.view().load_status() == servo::LoadStatus::Complete;
+                let ready = !self.tab().loading();
                 value(
                     json!({"ready":ready,"message":if ready {"Wega Browser is ready"} else {"Page is loading"}}),
                 )
@@ -163,6 +182,10 @@ impl Browser {
             }
             Command::GetCurrentUrl => value(json!(self.tab().url())),
             Command::GetTitle => {
+                if self.is_wega() {
+                    let _ = reply.send(value(json!(self.tab().title())));
+                    return;
+                }
                 // History restoration can switch the active document before the
                 // embedder's cached title notification arrives. Query the document.
                 self.view()

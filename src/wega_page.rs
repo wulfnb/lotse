@@ -1,0 +1,365 @@
+//! A real page in the independently built Blitz/QuickJS worker. IPC never blocks the UI.
+use crate::engine::Wake;
+use std::{
+    io::Read,
+    path::PathBuf,
+    process::{Child, Command, Stdio},
+    sync::{Arc, Mutex, mpsc},
+};
+use wega::{
+    engine_protocol::{self as protocol, Command as Request, Event},
+    model::Policy,
+    navigation::NavigationPort,
+};
+use winit::event_loop::EventLoopProxy;
+
+pub(crate) fn executable() -> Option<PathBuf> {
+    let path = std::env::var_os("WEGA_ENGINE_BINARY")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::current_exe().ok()?.parent().map(|p| {
+                p.join(if cfg!(windows) {
+                    "wega-engine.exe"
+                } else {
+                    "wega-engine"
+                })
+            })
+        })?;
+    path.is_file().then_some(path)
+}
+#[derive(Default)]
+pub(crate) struct Snapshot {
+    pub url: String,
+    pub title: String,
+    pub loading: bool,
+    pub failed: bool,
+    pub nodes: usize,
+    pub js_heap: usize,
+    pub notices: std::collections::VecDeque<String>,
+    pub navigations: std::collections::VecDeque<String>,
+    pub frame: Option<(u32, u32, Vec<u8>)>,
+    pub capture: Option<PathBuf>,
+    pub capture_result: Option<Result<(), String>>,
+    pub visited: Option<(String, String)>,
+    pub evaluated: Option<Result<String, String>>,
+    pub frozen: bool,
+}
+pub(crate) struct Page {
+    child: Child,
+    requests: Option<mpsc::SyncSender<Request>>,
+    pub state: Arc<Mutex<Snapshot>>,
+    pub texture: Option<egui::TextureHandle>,
+    pub viewport: Option<(u32, u32, f32, f32, bool)>,
+    pub zoom: f32,
+    history: Vec<String>,
+    index: usize,
+}
+fn failed(state: &Arc<Mutex<Snapshot>>, message: String, proxy: &EventLoopProxy<Wake>) {
+    let mut state = state
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    state.failed = true;
+    state.loading = false;
+    if state.notices.len() < 16 {
+        state.notices.push_back(message);
+    }
+    let _ = proxy.send_event(Wake::Ui);
+}
+impl Page {
+    pub fn new(
+        url: &url::Url,
+        policy: &Policy,
+        proxy: EventLoopProxy<Wake>,
+    ) -> Result<Self, String> {
+        let executable=executable().ok_or("Wega engine worker is not installed. Build it with python3 scripts/build-wega-engine.py --debug first.")?;
+        let mut command = Command::new(executable);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000); // Private worker, no console window.
+        }
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("Cannot start Wega engine: {e}"))?;
+        let mut stdin = child.stdin.take().ok_or("Missing worker input")?;
+        let mut stdout = child.stdout.take().ok_or("Missing worker output")?;
+        let state = Arc::new(Mutex::new(Snapshot {
+            url: url.to_string(),
+            loading: true,
+            ..Default::default()
+        }));
+        let (sender, receiver) = mpsc::sync_channel(32);
+        let shared = state.clone();
+        let writer_proxy = proxy.clone();
+        std::thread::spawn(move || {
+            while let Ok(request) = receiver.recv() {
+                if let Err(error) = protocol::write(&mut stdin, &request) {
+                    failed(
+                        &shared,
+                        format!("Wega engine connection failed: {error}"),
+                        &writer_proxy,
+                    );
+                    break;
+                }
+            }
+        });
+        let shared = state.clone();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let mut ready = false;
+                while let Some(event) =
+                    protocol::read::<Event>(&mut stdout).map_err(|e| e.to_string())?
+                {
+                    if !ready {
+                        if !matches!(
+                            event,
+                            Event::Ready {
+                                version: protocol::VERSION
+                            }
+                        ) {
+                            return Err("Incompatible Wega engine worker".into());
+                        }
+                        ready = true;
+                        continue;
+                    }
+                    match event {
+                        Event::Frame { width, height } => {
+                            let mut bytes = vec![
+                                0;
+                                protocol::frame_bytes(width, height)
+                                    .map_err(|e| e.to_string())?
+                            ];
+                            stdout.read_exact(&mut bytes).map_err(|e| e.to_string())?;
+                            let capture = shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .capture
+                                .take();
+                            if let Some(path) = capture {
+                                let result = image::save_buffer(
+                                    &path,
+                                    &bytes,
+                                    width,
+                                    height,
+                                    image::ColorType::Rgba8,
+                                )
+                                .map_err(|e| e.to_string());
+                                shared
+                                    .lock()
+                                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                    .capture_result = Some(result);
+                            }
+                            // Keep the newest frame only. A slow UI cannot grow a backlog.
+                            let mut state = shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if !state.frozen {
+                                state.frame = Some((width, height, bytes));
+                            }
+                        }
+                        Event::State {
+                            url,
+                            title,
+                            loading,
+                            nodes,
+                            js_heap,
+                        } => {
+                            let mut state = shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if state.loading && !loading {
+                                state.visited = Some((url.clone(), title.clone()));
+                            }
+                            state.url = url;
+                            state.title = title;
+                            state.loading = loading;
+                            state.nodes = nodes;
+                            state.js_heap = js_heap;
+                        }
+                        Event::Notice(message) => {
+                            let mut state = shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if state.notices.len() < 16 {
+                                state.notices.push_back(message);
+                            }
+                        }
+                        Event::Navigate(url) => {
+                            let mut state = shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner);
+                            if state.navigations.len() < 8 {
+                                state.navigations.push_back(url);
+                            }
+                        }
+                        Event::Evaluated { value, error } => {
+                            shared
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .evaluated = Some(error.map_or(Ok(value), Err));
+                        }
+                        Event::Ready { .. } => return Err("Unexpected worker handshake".into()),
+                    }
+                    let _ = proxy.send_event(Wake::Ui);
+                }
+                Err("Wega engine stopped. Reload this page or switch to Servo.".into())
+            })();
+            if let Err(error) = result {
+                failed(&shared, error, &proxy);
+            }
+        });
+        let page = Self {
+            child,
+            requests: Some(sender),
+            state,
+            texture: None,
+            viewport: None,
+            zoom: 1.0,
+            history: vec![url.to_string()],
+            index: 0,
+        };
+        page.send(Request::Init {
+            version: protocol::VERSION,
+            url: url.to_string(),
+            offline: policy.offline,
+            blocked_hosts: policy.blocked_hosts.clone(),
+            allowed_hosts: policy.allowed_hosts.clone(),
+        })?;
+        Ok(page)
+    }
+    pub fn send(&self, request: Request) -> Result<(), String> {
+        self.requests
+            .as_ref()
+            .ok_or("Worker is closed")?
+            .try_send(request)
+            .map_err(|_| "Wega engine is busy or stopped. Reload or switch to Servo.".into())
+    }
+    pub fn command_sender(&self) -> Option<mpsc::SyncSender<Request>> {
+        self.requests.clone()
+    }
+    pub fn url(&self) -> String {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .url
+            .clone()
+    }
+    pub fn title(&self) -> String {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .title
+            .clone()
+    }
+    pub fn loading(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .loading
+    }
+    pub fn can_back(&self) -> bool {
+        self.index > 0
+    }
+    pub fn can_forward(&self) -> bool {
+        self.index + 1 < self.history.len()
+    }
+    pub fn freeze(&mut self, frozen: bool) {
+        let _ = self.send(Request::Freeze(frozen));
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.frozen = frozen;
+        if frozen {
+            self.texture = None;
+            state.frame = None;
+        }
+        self.viewport = None;
+    }
+    #[cfg(feature = "test-harness")]
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+    pub fn load_url(&mut self, url: url::Url) -> Result<(), String> {
+        self.send(Request::Load(url.to_string()))?;
+        self.history.truncate(self.index + 1);
+        self.history.push(url.to_string());
+        self.index = self.history.len() - 1;
+        if self.history.len() > 256 {
+            self.history.remove(0);
+            self.index -= 1;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.url = url.to_string();
+        state.loading = true;
+        state.failed = false;
+        Ok(())
+    }
+    pub fn resize(
+        &mut self,
+        width: u32,
+        height: u32,
+        scale: f32,
+        dark: bool,
+    ) -> Result<(), String> {
+        let viewport = (width, height, scale, self.zoom, dark);
+        if self.viewport != Some(viewport) {
+            self.send(Request::Resize {
+                width,
+                height,
+                scale,
+                zoom: self.zoom,
+                dark,
+            })?;
+            self.viewport = Some(viewport);
+        }
+        Ok(())
+    }
+}
+impl NavigationPort for Page {
+    fn load(&mut self, url: url::Url) {
+        let _ = self.load_url(url);
+    }
+    fn reload(&mut self) {
+        let _ = self.send(Request::Load(self.url()));
+    }
+    fn traverse(&mut self, forward: bool) -> bool {
+        if (forward && !self.can_forward()) || (!forward && !self.can_back()) {
+            return false;
+        }
+        let next = if forward {
+            self.index + 1
+        } else {
+            self.index - 1
+        };
+        if self
+            .send(Request::Load(self.history[next].clone()))
+            .is_err()
+        {
+            return false;
+        }
+        self.index = next;
+        true
+    }
+    fn zoom(&self) -> f32 {
+        self.zoom
+    }
+    fn set_zoom(&mut self, value: f32) {
+        self.zoom = value;
+        self.viewport = None;
+    }
+}
+impl Drop for Page {
+    fn drop(&mut self) {
+        self.requests.take();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}

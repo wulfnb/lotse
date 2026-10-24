@@ -118,6 +118,12 @@ jobs:
           python -m coverage html
           python -m coverage xml
           python -m coverage json
+      - name: Build and test the independent Wega engine
+        run: |
+          python scripts/build-wega-engine.py --debug
+          cargo test --locked --manifest-path engines/Cargo.toml --target-dir target/wega-engine
+          cargo clippy --locked --manifest-path engines/Cargo.toml --target-dir target/wega-engine --all-targets -- -D warnings
+          cargo fmt --manifest-path engines/Cargo.toml --check
       - name: Instrumented unit and real engine coverage
         run: python scripts/desktop-coverage.py
       - name: Native integration suite verification
@@ -216,6 +222,8 @@ jobs:
       - name: Install pinned media SDK
         shell: pwsh
         run: scripts\install-windows-media.ps1
+      - name: Build the independent Wega engine
+        run: python scripts/build-wega-engine.py --debug
       - name: Build the desktop browser
         run: cargo build --locked --no-default-features --features desktop,brotli-streams,media
       - name: Launch the browser

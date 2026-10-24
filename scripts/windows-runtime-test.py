@@ -35,6 +35,10 @@ def main():
     env.update(WEGA_FIXTURE_URL=f'http://127.0.0.1:{server.server_port}',WEGA_TEST_OUTPUT=str(work))
     try:
         subprocess.run([sys.executable,str(ROOT/'tests/media_smoke.py'),str(binary)],env=env,check=True,timeout=120)
+        capture=work/'wega-engine.png'
+        subprocess.run([str(binary),'--engine','wega','--profile-dir',str(work/'wega-engine-profile'),'--capture',str(capture),env['WEGA_FIXTURE_URL']+'/wega-engine.html'],env=env,check=True,timeout=65)
+        report=json.loads(capture.with_suffix('.json').read_text())
+        assert report['engine']=='wega' and report['servoInitialized'] is False and report['title']=='Wega engine ready',report
         with socket.socket() as listener:
             listener.bind(('127.0.0.1',0));port=listener.getsockname()[1]
         profile=work/'profile';profile.mkdir()

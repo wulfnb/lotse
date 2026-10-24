@@ -6,7 +6,7 @@ $destination = Join-Path $env:TEMP ('Wega-install-check-' + [guid]::NewGuid().To
 try {
     $process = Start-Process -FilePath (Resolve-Path $Installer) -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/DIR=`"$destination`"") -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
-    foreach ($file in 'wega.exe', 'libEGL.dll', 'libGLESv2.dll', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.html', 'unins000.exe') {
+    foreach ($file in 'wega.exe', 'wega-engine.exe', 'WEGA-ENGINE-THIRD-PARTY-NOTICES.html', 'libEGL.dll', 'libGLESv2.dll', 'LICENSE', 'NOTICE', 'THIRD-PARTY-NOTICES.html', 'unins000.exe') {
         if (!(Test-Path (Join-Path $destination $file))) { throw "Installed file missing: $file" }
     }
     $capabilities = Get-ItemProperty "$registration\Capabilities\URLAssociations"

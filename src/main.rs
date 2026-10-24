@@ -212,9 +212,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse_from(std::env::args().skip(1)).map_err(std::io::Error::other)?;
     if options.help {
         println!(
-            "Wega Browser\nUsage: wega [--profile-dir PATH] [--capture FILE.png] [URL]\n  --remote-devtools PORT · --webdriver-port PORT\n    Both open UNAUTHENTICATED endpoints on 127.0.0.1. Any local process or user\n    can then read and control open pages (cookies, sessions, input). Use them\n    only on a trusted machine and with a disposable --profile-dir.\n  --multiprocess (requires --features multiprocess)\n  Native tests require --features test-harness and an isolated --profile-dir.\n  Test modes: --smoke-test, --download-test, --toolbox-test, --theme-test, --capabilities-test"
+            "Wega Browser\nUsage: wega [--engine servo|wega] [--profile-dir PATH] [--capture FILE.png] [URL]\n  --remote-devtools PORT · --webdriver-port PORT\n    Both open UNAUTHENTICATED endpoints on 127.0.0.1. Any local process or user\n    can then read and control open pages (cookies, sessions, input). Use them\n    only on a trusted machine and with a disposable --profile-dir.\n  --multiprocess (requires --features multiprocess)\n  Native tests require --features test-harness and an isolated --profile-dir.\n  Test modes: --engine-test, --smoke-test, --download-test, --toolbox-test, --theme-test, --capabilities-test"
         );
         return Ok(());
+    }
+    if (options.engine == Some(wega::engine_choice::EngineKind::Wega) || options.engine_test)
+        && wega_page::executable().is_none()
+    {
+        return Err("Wega engine is not installed. Run python3 scripts/build-wega-engine.py --debug, or use --engine servo.".into());
     }
     #[cfg(target_os = "windows")]
     let Some(instance) = windows_instance::claim(&options)? else {
@@ -270,3 +275,6 @@ mod chrome;
 mod download_actions;
 mod navigation_adapter;
 mod permission_adapter;
+mod servo_host;
+mod wega_page;
+mod wega_ui;

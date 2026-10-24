@@ -132,6 +132,8 @@ pub struct Profile {
     pub urls: Vec<String>,
     /// Last known page titles for `urls`, shown for tabs that are not loaded yet.
     pub titles: Vec<String>,
+    /// Matches saved URL order; older profiles use Servo for every tab.
+    pub engines: Vec<crate::engine_choice::EngineKind>,
     pub active: usize,
     pub bookmarks: Vec<Bookmark>,
     pub history: Vec<Bookmark>,
@@ -148,6 +150,7 @@ impl Default for Profile {
             sidebar_width: 240.0,
             urls: vec![HOME.into()],
             titles: Vec::new(),
+            engines: Vec::new(),
             active: 0,
             bookmarks: vec![
                 Bookmark {
@@ -195,13 +198,22 @@ impl Profile {
         }
         self.sidebar_width = self.sidebar_width.clamp(150.0, 500.0);
         let mut titles = std::mem::take(&mut self.titles).into_iter();
-        let tabs: Vec<(String, String)> = std::mem::take(&mut self.urls)
-            .into_iter()
-            .map(|url| (url, titles.next().unwrap_or_default()))
-            .filter(|(url, _)| resolve_address(url).is_ok())
-            .take(100)
-            .collect();
-        (self.urls, self.titles) = tabs.into_iter().unzip();
+        let mut engines = std::mem::take(&mut self.engines).into_iter();
+        let tabs: Vec<(String, String, crate::engine_choice::EngineKind)> =
+            std::mem::take(&mut self.urls)
+                .into_iter()
+                .map(|url| {
+                    (
+                        url,
+                        titles.next().unwrap_or_default(),
+                        engines.next().unwrap_or_default(),
+                    )
+                })
+                .filter(|(url, _, _)| resolve_address(url).is_ok())
+                .take(100)
+                .collect();
+        self.engines = tabs.iter().map(|(_, _, engine)| *engine).collect();
+        (self.urls, self.titles) = tabs.into_iter().map(|(url, title, _)| (url, title)).unzip();
         for title in &mut self.titles {
             if title.len() > 512 {
                 *title = title.chars().take(256).collect();
@@ -210,6 +222,7 @@ impl Profile {
         if self.urls.is_empty() {
             self.urls.push(HOME.into());
             self.titles.push(String::new());
+            self.engines.push(Default::default());
         }
         self.active = self.active.min(self.urls.len() - 1);
         self.favicons.retain(|_, image| image.valid(64));

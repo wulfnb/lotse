@@ -105,6 +105,7 @@ impl Browser {
     }
 
     pub fn check_smoke_test(&mut self, event_loop: &ActiveEventLoop) {
+        self.check_engine_test(event_loop);
         self.check_download_test(event_loop);
         self.check_toolbox_test(event_loop);
         self.check_theme_test(event_loop);

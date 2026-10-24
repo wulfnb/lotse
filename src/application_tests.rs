@@ -35,6 +35,36 @@ fn application(fail_load: bool, fail_save: bool) -> (Application, Writes, Option
     (application, writes, warning)
 }
 #[test]
+fn engine_selection_stays_aligned_through_filtering_and_failed_saves() {
+    use crate::engine_choice::EngineKind::{Servo, Wega};
+    let (mut app, _, _) = application(false, false);
+    app.save_engine_tabs(
+        vec![
+            ("data:text/html,temp".into(), "Temporary".into(), Servo),
+            ("https://example.test/".into(), "Article".into(), Wega),
+        ],
+        1,
+    )
+    .unwrap();
+    assert_eq!(app.profile().engines, vec![Wega]);
+    assert_eq!(app.profile().active, 0);
+    assert_eq!(app.profile().titles, vec!["Article"]);
+    let (mut app, _, _) = application(false, true);
+    assert!(
+        app.save_engine_tabs(
+            vec![("https://example.test/".into(), "Article".into(), Wega)],
+            0
+        )
+        .is_err()
+    );
+    assert!(app.profile().engines.is_empty());
+    assert_eq!(
+        crate::engine_choice::EngineKind::parse("servo").unwrap(),
+        Servo
+    );
+    assert!(crate::engine_choice::EngineKind::parse("unknown").is_err());
+}
+#[test]
 fn storage_errors_never_overwrite_recovery_data() {
     let (mut app, writes, warning) = application(true, false);
     assert!(warning.unwrap().contains("broken profile"));

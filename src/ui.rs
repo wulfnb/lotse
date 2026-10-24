@@ -444,7 +444,7 @@ impl Browser {
                 )
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        let status_width = (ui.available_width() - 310.0).max(24.0);
+                        let status_width = (ui.available_width() - 470.0).max(24.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(status_width, 20.0),
                             egui::Layout::left_to_right(egui::Align::Center),
@@ -477,13 +477,8 @@ impl Browser {
                                         self.chrome.notice = None;
                                     }
                                 } else {
-                                    let status = self.view().status_text().unwrap_or_else(|| {
-                                        if self.view().load_status() == servo::LoadStatus::Complete
-                                        {
-                                            String::new()
-                                        } else {
-                                            "Loading page…".into()
-                                        }
+                                    let status = self.tab().view().and_then(|view|view.status_text()).unwrap_or_else(|| {
+                                        if self.tab().loading(){"Loading page…".into()}else if self.is_wega(){"Experimental: forms, media and page tools need Servo".into()}else{String::new()}
                                     });
                                     ui.add(
                                         egui::Label::new(
@@ -495,13 +490,14 @@ impl Browser {
                             },
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            self.engine_picker(ui);
                             if ui.small_button("+").clicked() {
                                 self.zoom(1.1);
                             }
                             if ui
                                 .small_button(format!(
                                     "{}%",
-                                    (self.view().page_zoom() * 100.0).round()
+                                    (self.page_zoom() * 100.0).round()
                                 ))
                                 .clicked()
                             {
@@ -579,7 +575,7 @@ impl Browser {
                 self.toggle_layout();
             }
             if ui
-                .add_enabled_ui(self.view().can_go_back(), |ui| {
+                .add_enabled_ui(self.can_go_back(), |ui| {
                     icon(ui, "←", "Back (Alt+Left)")
                 })
                 .inner
@@ -588,7 +584,7 @@ impl Browser {
                 self.traverse(false);
             }
             if ui
-                .add_enabled_ui(self.view().can_go_forward(), |ui| {
+                .add_enabled_ui(self.can_go_forward(), |ui| {
                     icon(ui, "→", "Forward (Alt+Right)")
                 })
                 .inner
@@ -601,7 +597,7 @@ impl Browser {
             if reload.clicked() {
                 self.reload();
             }
-            let url = self.view().url();
+            let url = self.current_url();
             let protocol = url.as_ref().map(|u| u.scheme()).unwrap_or("");
             let security = ui.button(RichText::new(match protocol {
                 "https" => "🔒", "http" => "⚠ Not secure", "wega" => "Wega", "file" => "File", _ => "Site",
@@ -753,8 +749,8 @@ impl Browser {
                 if ui.button("About Wega").clicked(){self.navigate("wega://about");ui.close();}
                 if ui.button("Site information").clicked() {self.refresh_site_data();self.features.site_info=true;ui.close();}
                 if ui.button("Save page as image").clicked() {self.screenshot_page();ui.close();}
-                if ui.button("Reader view").clicked() {self.view().evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
-                if ui.button("Toggle page dark style").clicked() {self.view().evaluate_javascript("(()=>{let s=document.getElementById('__wega_dark');if(s){s.remove();return} s=document.createElement('style');s.id='__wega_dark';s.textContent='html{color-scheme:dark!important;background:#171717!important;color:#eee!important}body,main,article,section,header,footer,nav{background-color:#171717!important;color:#eee!important}a{color:#a9caff!important}';document.head.appendChild(s)})()", |_|{});ui.close();}
+                if ui.add_enabled(!self.is_wega(),egui::Button::new("Reader view")).clicked() {self.view().evaluate_javascript(include_str!("reader.js"), |_|{});ui.close();}
+                if ui.add_enabled(!self.is_wega(),egui::Button::new("Toggle page dark style")).clicked() {self.view().evaluate_javascript("(()=>{let s=document.getElementById('__wega_dark');if(s){s.remove();return} s=document.createElement('style');s.id='__wega_dark';s.textContent='html{color-scheme:dark!important;background:#171717!important;color:#eee!important}body,main,article,section,header,footer,nav{background-color:#171717!important;color:#eee!important}a{color:#a9caff!important}';document.head.appendChild(s)})()", |_|{});ui.close();}
                 if ui.button("Find in page").clicked() {self.features.find_open=true;ui.close();}
                 if ui.button("Reload without cache").clicked() {self.reload_without_cache();ui.close();}
                 if ui.button("Home").clicked() {

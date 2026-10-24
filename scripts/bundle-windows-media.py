@@ -88,7 +88,9 @@ def bundle(sdk, destination, system, vc_runtime=None):
             raise ValueError('Expected the release x64 Microsoft.VC*.CRT REDIST directory')
         for path in vc_runtime.glob('*.dll'):
             if REDISTRIBUTABLE.match(path.name): index[path.name.casefold()]=path
-    queue=deque([destination/'wega.exe',*[index.get(name.casefold(),sdk/'missing'/name) for name in plugins()]])
+    executables=[destination/'wega.exe']
+    if (destination/'wega-engine.exe').is_file(): executables.append(destination/'wega-engine.exe')
+    queue=deque([*executables,*[index.get(name.casefold(),sdk/'missing'/name) for name in plugins()]])
     visited=set(); manifest=[]
     while queue:
         source=queue.popleft(); key=source.name.casefold()

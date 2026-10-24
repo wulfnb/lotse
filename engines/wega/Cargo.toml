@@ -1,0 +1,23 @@
+[package]
+name = "wega-engine"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "MPL-2.0"
+publish = false
+description = "Wega's experimental Blitz-based page engine"
+
+[dependencies]
+blitz-dom = { version = "=0.3.0-beta.4", default-features = false, features = ["system-fonts", "svg", "woff", "autofocus", "scrollbars"] }
+blitz-html = "=0.3.0-beta.4"
+blitz-paint = { version = "=0.3.0-beta.4", features = ["scrollbars"] }
+blitz-traits = "=0.3.0-beta.4"
+anyrender = "=0.14.0"
+anyrender_vello_cpu = { version = "=0.18.0", default-features = false }
+rquickjs = "=0.14.0"
+html5ever = "0.40.1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "gzip", "brotli"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+url = "2.5"
+data-url = "0.3"

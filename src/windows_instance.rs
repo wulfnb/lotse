@@ -59,13 +59,14 @@ pub fn claim(
     if !existing {
         return Ok(Some(claim));
     }
-    if options.test_mode()
+    if options.engine.is_some()
+        || options.test_mode()
         || options.capture.is_some()
         || options.webdriver_port.is_some()
         || options.remote_devtools.is_some()
     {
         return Err(
-            "This profile is already running; use an isolated profile for diagnostics".into(),
+            "This profile is already running; choose its engine in the browser, or use an isolated profile for diagnostics".into(),
         );
     }
     let urls: Vec<String> = options

@@ -61,7 +61,10 @@ impl Browser {
                 "window.__wegaUserScript = 73".into(),
                 None,
             ));
-            self.content_manager.add_script(script.clone());
+            self.content_manager
+                .get()
+                .unwrap()
+                .add_script(script.clone());
             self.features.script = Some(script);
             let fixture = self
                 .view()

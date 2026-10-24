@@ -29,6 +29,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock build.rs ./
 COPY vendor ./vendor
 COPY src ./src
+COPY engines ./engines
+COPY scripts/build-wega-engine.py ./scripts/build-wega-engine.py
 COPY assets/icons/browser-icon-256.png ./assets/icons/browser-icon-256.png
 ARG BUILD_PROFILE=release
 ARG BUILD_JOBS=4
@@ -38,10 +40,11 @@ RUN --mount=type=cache,id=servo-registry-${TARGETARCH},target=/usr/local/cargo/r
     --mount=type=cache,id=wega-target-${TARGETARCH}-${BUILD_PROFILE},target=/src/target \
     touch src/main.rs assets/icons/browser-icon-256.png && \
     cargo build --locked --features "${BUILD_FEATURES}" --profile "${BUILD_PROFILE}" --jobs "${BUILD_JOBS}" && \
+    python3 scripts/build-wega-engine.py --profile "${BUILD_PROFILE}" --jobs "${BUILD_JOBS}" && \
     mkdir -p /out && \
-    if [ "${BUILD_PROFILE}" = dev ]; then cp target/debug/wega /out/; \
-    else cp "target/${BUILD_PROFILE}/wega" /out/; fi && \
-    strip /out/wega
+    if [ "${BUILD_PROFILE}" = dev ]; then cp target/debug/wega target/debug/wega-engine /out/; \
+    else cp "target/${BUILD_PROFILE}/wega" "target/${BUILD_PROFILE}/wega-engine" /out/; fi && \
+    strip /out/wega /out/wega-engine
 # Copied after the build so notice edits do not invalidate the compile layer.
 COPY about.toml about.hbs LICENSE NOTICE ./
 COPY scripts/third-party-notices.sh ./scripts/third-party-notices.sh
@@ -115,4 +118,4 @@ LABEL org.opencontainers.image.title="Wega" \
       org.opencontainers.image.licenses="MPL-2.0" \
       org.opencontainers.image.source="https://github.com/wulfnb/wega"
 COPY --from=builder /out/notices/ /usr/share/doc/wega/
-COPY --from=builder /out/wega /usr/local/bin/wega
+COPY --from=builder /out/wega /out/wega-engine /usr/local/bin/

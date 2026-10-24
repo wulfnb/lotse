@@ -19,6 +19,11 @@ for argument in "$@"; do
   esac
 done
 cargo build --locked "${build_args[@]}" "${media_args[@]}"
+if [[ "$build_profile" == debug ]]; then
+  python3 scripts/build-wega-engine.py --debug
+else
+  python3 scripts/build-wega-engine.py
+fi
 app_dir="$project_dir/target/Wega.app"
 mkdir -p "$app_dir/Contents/MacOS"
 mkdir -p "$app_dir/Contents/Resources"
@@ -26,6 +31,9 @@ cp assets/icons/BrowserIcon.icns "$app_dir/Contents/Resources/BrowserIcon.icns"
 cp "target/$build_profile/wega" "$app_dir/Contents/MacOS/wega.new"
 # Replace the inode atomically so a running older app keeps its executable intact.
 mv -f "$app_dir/Contents/MacOS/wega.new" "$app_dir/Contents/MacOS/wega"
+cp "target/$build_profile/wega-engine" "$app_dir/Contents/MacOS/wega-engine.new"
+mv -f "$app_dir/Contents/MacOS/wega-engine.new" "$app_dir/Contents/MacOS/wega-engine"
+codesign --force --sign - --timestamp=none "$app_dir/Contents/MacOS/wega-engine"
 cat > "$app_dir/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -59,5 +67,7 @@ if [[ "$build_profile" == release ]]; then
 fi
 if $bundle_media; then
   python3 scripts/bundle-macos-media.py "$app_dir"
+else
+  codesign --force --sign - --timestamp=none "$app_dir"
 fi
 printf 'Built %s\n' "$app_dir"

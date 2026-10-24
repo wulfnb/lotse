@@ -8,6 +8,7 @@ def fingerprint(root):
     digest = hashlib.sha256()
     files = set(root.glob('src/**/*.rs')) | set(root.glob('src/**/*.js'))
     files |= {root / name for name in ('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml')}
+    files |= {path for path in root.glob('engines/**/*') if path.is_file() and 'target' not in path.parts and path.suffix in {'.rs','.js','.toml','.lock'}}
     # Vendored code generators and allocator fixes affect the tested engine even
     # when the dependency version/path in Cargo.lock stays the same.
     files |= {path for path in root.glob('vendor/**/*')
