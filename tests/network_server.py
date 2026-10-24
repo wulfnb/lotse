@@ -25,6 +25,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     def do_GET(self):
+        if self.path.startswith('/w/load.php?wega-mask-fixture'):
+            body=b'.vector-icon.fixture{mask-image:url(/mask-fixture.svg);-webkit-mask-image:url(/mask-fixture.svg)}'
+            self.send_response(200);self.send_header('Content-Type','text/css');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body);return
+
         if self.path.split('?', 1)[0] == '/interaction.html':
             visits = getattr(self.server, 'interaction_visits', 0)
             self.server.interaction_visits = visits + 1

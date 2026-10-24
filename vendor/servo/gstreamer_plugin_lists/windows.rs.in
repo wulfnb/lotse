@@ -1,6 +1,9 @@
 // The format of this file is intended to be directly `include!()` able as a [&'static str] in Rust,
 // and a valid python list[str] after stripping the `//` comments at the beginning of lines (from gstreamer.py).
 [
+// Modified by Wega contributors, 2026: native Windows codec paths without FFmpeg.
 // gst-plugins-bad
-"gstwasapi"
+"gstwasapi",
+"gstd3d11",
+"gstmediafoundation"
 ]

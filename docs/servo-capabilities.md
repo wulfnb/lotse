@@ -22,13 +22,14 @@ The default build remains WebRender/GL. The presence of a delegate method or Car
 | Storage cookie inspector | Asynchronous engine-backed cookie table for the active HTTP(S) URL, including HttpOnly, Secure, SameSite, domain, path and expiry, with native filtering. Navigation resets results; opaque origins show an explanation. Cookie editing and IndexedDB inspection remain outstanding. |
 | User scripts | Persisted source via UserContentManager.add_script; explicit Apply. Reader overlay preserves original document; a page-dark-style toggle is also available. These are page DOM features, not Firefox Reader View parity. |
 | Screenshots | Asynchronous WebView screenshot API exports viewport PNG to the profile's screenshots directory. Thumbnail/new-tab preview gallery remains outstanding. |
-| Pinch zoom | Native trackpad pinch routed separately from page zoom. |
+| Pinch zoom | Native trackpad pinch routed separately from page zoom. The Docker viewer also has an explicit local pan/pinch mode that suspends remote input and resizing; real Chrome/noVNC gestures are verified, physical mobile devices remain untested. |
+| Permission persistence/revocation | Page-scoped grants and top-level-origin Block/Ask only. The pinned callback lacks requesting-frame identity and the engine cannot acknowledge active-access revocation. See [required engine changes](permission-engine-requirements.md). |
 | Custom requests | Reload without cache uses UrlRequest custom headers. Servo 0.7's public UrlRequest has URL and headers only; custom method/body cannot be implemented through this API. |
 | Clear tab history | Settings calls WebView.clear_session_history. |
 | WebDriver | Opt-in loopback W3C transport from Mozilla's webdriver crate. Sessions, URL/title/source, navigation, script evaluation with JSON arguments, handles/selection and screenshots. Navigation uses WebView operations and actual load/traversal completion callbacks; page source uses Servo.execute_webdriver_command with a supported script command. Other endpoints explicitly return UnsupportedOperation; not a complete Selenium implementation. |
 | Memory allocation reports | Patched pinned Servo DOM vtables to distinguish Box and Rc allocations: Rc value pointers include a preceding reference-count header and cannot be passed directly to allocator-size callbacks. Ownership/alignment regressions pass. The real toolbox Memory probe now passes in a fresh Linux ARM64 debug/test-harness build, together with all Linux runtime/shell checks. macOS native measurement also passes; Ubuntu x86_64 release CI must rerun after push. |
 | WebRender tools | Settings offers profiler, texture cache, render targets and capture via native Servo calls. |
-| GStreamer media | Enabled by default. Real WebM video and WAV audio decoding/playback are integration tested. macOS packaging includes the explicit plugin list and dependent libraries. GStreamer SDK, pkgconf and libnice-gstreamer were installed on the development Mac. macOS uses frame uploads; accelerated-media initialization is not invoked because the exposed API has no CGL context representation. Codec/site compatibility still follows Servo and the bundled plugins. |
+| GStreamer media | Enabled by default. Real WebM video and WAV audio decoding/playback are integration tested. macOS packaging includes the explicit plugin list and dependent libraries. GStreamer SDK, pkgconf and libnice-gstreamer were installed on the development Mac. macOS uses frame uploads; accelerated-media initialization is not invoked because the exposed API has no CGL context representation. Windows CI/release packaging now enables a pinned GStreamer SDK and exact x64 dependency closure, including native Media Foundation/D3D11 plugins; actual Windows playback must pass CI after push. Per-element fallback messaging is native-fixture tested. Codec/site compatibility still follows Servo and the bundled plugins. |
 | Multiprocess | Optional Cargo `multiprocess` feature plus `--multiprocess` and early content-process dispatch. Experimental; this is not a claim of sandboxing or one OS process for every site. |
 | WebGPU | Outstanding: dependency/build activation and adapter/device-loss validation. |
 | Gamepads/haptics | Outstanding: input backend and haptic delegate. |
@@ -78,7 +79,11 @@ python3 tests/media_smoke.py 'target/Wega.app/Contents/MacOS/wega'
 
 ### Website icon rendering (23 October UI review)
 
-Wikipedia interface icons were observed as solid black squares in the review
-capture `docs/ui-ux-2026-10-23/wikipedia.jpg`. CSS mask support is a suspected
-cause, not a confirmed diagnosis. A minimal fixture and comparison with the next
-Servo release remain required; browser chrome changes do not resolve this gap.
+Wikipedia interface icons in `docs/ui-ux-2026-10-23/wikipedia.jpg` use Vector
+SVG masks over black backgrounds. The live diagnostic confirmed that both CSS
+mask support checks return false. `src/mask_icons.js` supplies a scoped MediaWiki
+compatibility fallback using the original same-origin SVG URLs and selectors;
+it skips engines with mask support. An actual native screenshot of the same mask
+pattern verifies transparent corners and a visible glyph. A fresh live Wikipedia
+capture remains required because verification navigation timed out. This does
+not implement general CSS masks in Servo.

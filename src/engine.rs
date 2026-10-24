@@ -9,7 +9,7 @@ use winit::{event_loop::EventLoopProxy, window::Window};
 
 #[derive(Clone, Debug)]
 pub enum Wake {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     OpenUrls(Vec<String>),
     Servo,
     Ui,

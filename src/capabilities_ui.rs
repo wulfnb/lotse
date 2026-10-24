@@ -308,7 +308,7 @@ impl Browser {
                         0 => {
                             ui.heading("Appearance");
                             for theme in crate::theme::Theme::ALL {
-                                if self.native_theme.is_none() && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
+                                if !self.native_theme.as_ref().is_some_and(|native| native.available()) && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
                                 ui.horizontal(|ui| {
                                     let palette=theme.palette(self.window.theme()!=Some(winit::window::Theme::Light), false);
                                     for color in [palette.chrome,palette.selected,palette.accent] {
@@ -484,7 +484,7 @@ impl Browser {
                     if let Some(origin) = current.as_ref().filter(|url| matches!(url.scheme(),"http"|"https")).map(|url| url.origin().ascii_serialization()) {
                         ui.separator();
                         ui.collapsing("Site permissions",|ui| {
-                        ui.weak("Blocked features will not prompt on this page or its frames. Other requests ask each time. Close pages already using device access when blocking it.");
+                        ui.weak("Allow lasts for the requesting page. Blocking denies queued and new permission prompts; it does not revoke access already granted. Restart Wega to end active device access. Remembered access is unavailable in this version.");
                         for (feature,label) in [("Notifications","Notifications"),("Geolocation","Location"),("Camera","Camera"),("Microphone","Microphone"),("Push","Push messages"),("Midi","MIDI devices"),("Speaker","Audio output"),("DeviceInfo","Device information"),("BackgroundSync","Background sync"),("Bluetooth","Bluetooth"),("PersistentStorage","Persistent storage"),("Gamepad","Gamepads"),("ScreenWakeLock(Screen)","Screen wake lock")] {
                             let mut blocked = self.profile().policy.permission_blocked(&origin,feature);
                             if ui.checkbox(&mut blocked,format!("Block {label}")).changed() {

@@ -29,6 +29,8 @@ mod network;
 mod network_controls;
 mod performance_ui;
 mod probes;
+#[cfg(target_os = "windows")]
+mod windows_instance;
 use wega::profile;
 mod accessibility;
 #[cfg(feature = "test-harness")]
@@ -65,7 +67,7 @@ struct App {
     browser: Option<Browser>,
     proxy: winit::event_loop::EventLoopProxy<Wake>,
     failure: Option<String>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pending_open: Vec<url::Url>,
     #[cfg(target_os = "macos")]
     open_events: mac_application::OpenEvents,
@@ -84,7 +86,7 @@ impl ApplicationHandler<Wake> for App {
                     .with_visible(false)
                     .with_title(crate::brand::APP_NAME)
                     .with_window_icon(browser_icon())
-                    .with_transparent(cfg!(target_os = "macos"))
+                    .with_transparent(cfg!(any(target_os = "macos", target_os = "windows")))
                     .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 850.0))
                     .with_min_inner_size(winit::dpi::LogicalSize::new(720.0, 480.0)),
             )
@@ -93,7 +95,7 @@ impl ApplicationHandler<Wake> for App {
         match result {
             Ok(browser) => {
                 self.browser = Some(browser);
-                #[cfg(target_os = "macos")]
+                #[cfg(any(target_os = "macos", target_os = "windows"))]
                 self.browser
                     .as_mut()
                     .unwrap()
@@ -107,7 +109,7 @@ impl ApplicationHandler<Wake> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         if let Wake::OpenUrls(addresses) = &event {
             let urls = wega::options::external_launch_urls(addresses);
             if let Some(browser) = &mut self.browser {
@@ -214,6 +216,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         );
         return Ok(());
     }
+    #[cfg(target_os = "windows")]
+    let Some(instance) = windows_instance::claim(&options)? else {
+        return Ok(());
+    };
     #[cfg(feature = "media")]
     {
         let profile = options
@@ -241,12 +247,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let event_loop = EventLoop::<Wake>::with_user_event().build()?;
     #[cfg(target_os = "macos")]
     let open_events = mac_application::install(event_loop.create_proxy());
+    #[cfg(target_os = "windows")]
+    let _launch_receiver = instance.listen(event_loop.create_proxy())?;
     let mut app = App {
         options,
         browser: None,
         proxy: event_loop.create_proxy(),
         failure: None,
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         pending_open: Vec::new(),
         #[cfg(target_os = "macos")]
         open_events,

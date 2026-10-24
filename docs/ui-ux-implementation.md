@@ -5,6 +5,7 @@ The original follow-ups were committed as `7d6b1bc`; later CI fixes and continue
 work are recorded at the end. Commit statements in earlier checkpoints describe
 those checkpoints, not the current Git state.
 The [23 October follow-up](#23-october-follow-up) tracks the separate second-pass backlog.
+The [24 October checkpoint](#remaining-proposal-implementation--24-october-2026) is the latest status; earlier remaining-work lists describe their checkpoints.
 The original review describes the pre-change experience. This document records
 the resulting behavior and the limits of verification; it does not certify every
 OS, assistive technology or device configuration.
@@ -528,3 +529,126 @@ Evidence: `target/ci-fix/{core-followup-final,python-followup,desktop-followup}.
 Linux evidence is listed above. The agent has not pushed or changed the user's
 default browser. GitHub's Linux x86_64 release and Windows checks must run after
 push before cross-platform CI can be called green.
+
+
+## Remaining proposal implementation — 24 October 2026
+
+### Viewer backlog and local gestures
+
+Auto quality samples actual queued actions, flip frames, oldest-action age and
+completed paints. Two congested samples lower quality; ten clear samples with new
+painted frames recover it. Idle connections never improve quality. Network hints
+can cap quality, while manual Sharp/Fast stay explicit. The Docker build validates
+the pinned noVNC source hashes before adding a small public statistics/viewport
+API; changed upstream source fails the build before any patch is written.
+
+Pan/zoom viewer is a separate local mode: remote input and remote resizing pause,
+one pointer pans, two touch pointers zoom around their centroid, and Reset fits
+the existing framebuffer. Leaving the mode restores remote input and the selected
+size preset. Capture-phase handlers consume gestures only in this explicit mode.
+The viewer stylesheet had inadvertently contained HTML; it is restored to CSS,
+including compact/coarse-pointer controls, hidden states and the viewport origin.
+
+The real-browser regression starts an authenticated disposable Docker viewer and
+isolated Chrome. It checks real desktop pixels, touch pinch/pan, preserved zoom on
+resize, Fit restoration and unchanged remote resolution while panning. A real
+queued SVG decode/flip, followed by actual paints, proves backlog lowering and
+recovery; the frame queue drains and the expected red pixel is visible. No test
+credentials or Chrome profile are retained in uploadable artifacts. Physical
+mobile devices and their keyboard/IME behavior remain separate checks.
+
+### Windows implementation and media fallback
+
+CI and release builds enable media using official GStreamer MSVC x64 1.28.8,
+verified against a pinned SHA256. Packaging parses normal and delayed PE imports
+and copies only Servo's explicit plugins and their dependency closure, retaining
+license texts and provenance/hashes. Required Microsoft VC runtime DLLs come from
+the installed Visual Studio release x64 REDIST CRT directory, with separate
+notices and file hashes. A runner’s System32 copies cannot hide missing packaged
+VC dependencies. Missing dependencies, architecture mismatch
+and excluded FFmpeg/x264/x265/FAAC dependencies fail packaging. Windows adds native
+D3D11/Media Foundation plugins. Development SDK discovery checks actual plugin
+presence; packaged plugins take precedence. The published preview has not been
+replaced by these changes.
+
+Per-element video/audio failures show accessible network or unsupported-media
+messages with a download action only for safe HTTP(S) sources. Source reload
+clears obsolete messages. Native WebM/WAV decoding and the error fixture pass on
+macOS. The Windows CI regression strips SDK/plugin environment paths before
+checking packaged playback, then sends HTTP and Unicode/space HTML paths to a
+running profile and verifies loaded tabs and the original process.
+
+Windows launch handoff uses a per-profile named mutex and message-only window,
+validates bounded HTTP/HTTPS/file messages and sends work onto the UI event loop.
+DWM Mica is gated by Windows API support, high contrast and the user's transparency
+setting; unsupported or failed configurations retain opaque rendering. Both real
+Win32 adapters typecheck against the Windows target. Actual MSVC build, standalone
+media playback, installation, Mica composition and OS preference changes still
+require Windows CI and a real PC; no Windows runtime success is claimed locally.
+
+### Wikipedia diagnosis and scoped fallback
+
+The captured page reported no mask-image or -webkit-mask-image support. Its
+Vector stylesheet uses SVG masks over a black background, explaining the black
+squares. A scoped compatibility script reads same-origin MediaWiki load.php CSS
+and renders its original same-origin SVGs as backgrounds on matching vector-icon
+selectors. It preserves direction/appearance selectors, skips engines with mask
+support and does not change unrelated page rules or substitute guessed glyphs.
+A native fixture using this mask pattern verifies both a white transparent corner
+and the black glyph center in an actual screenshot. Fresh live Wikipedia
+navigation timed out during verification, so a corrected live-page capture is
+still required. General Servo CSS-mask rendering remains an engine gap.
+
+### Permission engine dependency
+
+Approval now says “Allow for this page”; site controls explain that Block affects
+queued/new prompts and cannot stop existing device access. Remembered automatic
+grants and active-access revocation are not implemented. The pinned callback
+lacks trusted requesting-frame/document identity, permission revocation is empty,
+and the media track implementation lacks stop. See the exact source references,
+required engine contract and iframe/worker/track acceptance checks in
+[permission-engine-requirements.md](permission-engine-requirements.md).
+
+### Remaining checks
+
+Windows runtime and physical-PC checks; live Wikipedia verification; real
+mobile devices, IME, clipboard and accessibility; real appearance/high-contrast
+changes; production-proxy recovery; signing/notarization; complete cross-platform
+coverage; and the permission engine work above remain outstanding. Earlier
+checkpoint lists are superseded by this section, without turning unrun platform
+checks into completed work.
+
+
+### Verification for the 24 October checkpoint
+
+- Core: **77 tests pass**, **1591/1664 lines (95.61%)**, passing the 95% gate.
+  The Windows drive-less-path test expectation is fixed separately in `0674e8e`;
+  all core tests compile for the Windows GNU target. Actual Windows execution is
+  left to the configured Windows CI job.
+- Desktop: **79 library, 34 desktop and 2 allocation tests pass**. All eight native
+  suites and macOS cold/running-instance URL and Unicode HTML launch checks pass
+  against the final embedded scripts. Coverage is **10769/12933 lines (83.27%)**.
+  The permission-prompt harness now expects its truthful “Allow for this page”
+  label; no permission assertion was removed.
+- Python: **60 tests pass**; gateway coverage remains **443/443 lines and 158/158
+  branches**. PE import/dependency, fail-closed noVNC patch and media regressions
+  are included. JavaScript’s unchanged **100% line gate passes**.
+- Final viewer assets pass real authenticated Chrome/noVNC checks, including the
+  centered login surface without forced clipping, actual queued decode and painted pixels,
+  touch gestures, resize preservation and Fit restoration. Reconnection keeps
+  remote resizing paused in local pan mode, including with the Resize preset.
+- The fresh Linux ARM64 image passes auth/session/WebSocket checks, smoke,
+  toolbox/Memory, downloads, gateway/upload/chooser security and shell contracts.
+  The final viewer layer is separately exercised in Chrome. This is local ARM64
+  validation, not a GitHub Ubuntu x86_64 CI result.
+- Production/test-harness Clippy with application warnings denied, formatting,
+  workflow lint, whitespace checks and real Win32 adapter cross-compilation pass.
+  Existing vendored Servo warnings remain. Actual Windows SDK installation,
+  MSVC linking and media/backdrop/handoff runtime are unverified locally.
+- Whole-project 100% is **not achieved**: the refreshed inventory still has 46
+  first-party files incomplete/unmeasured and four missing platform configurations.
+
+Evidence: `target/remaining/{desktop-verified,core-final,python-final,linux-final,
+viewer-final,windows-adapter-final}.log`, `target/coverage/desktop/native-tests/
+run-7zdr7sf4/`, and `target/viewer-live/run-TZ6hXj/`. Raw profiles and screenshots
+remain local; temporary test containers were removed. No push was performed.

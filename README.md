@@ -23,7 +23,8 @@ Changing layouts keeps the existing webviews and their page state alive.
 | Windows · x64 | [Download ZIP](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Windows-x64.zip) |
 | Linux · x86_64 | [Download tar.gz](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Linux-x86_64.tar.gz) |
 
-The Windows preview does not include video or audio playback.
+The currently published Windows preview does not include video or audio playback.
+The next Windows build enables bundled media; packaged playback is checked in Windows CI before release.
 
 These links download the current `test-preview` prerelease. Linux setup requirements
 are included in the archive's README.

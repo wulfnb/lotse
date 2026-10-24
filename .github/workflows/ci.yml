@@ -145,6 +145,9 @@ jobs:
           persist-credentials: false
       - name: Generate disposable test credentials
         run: echo "WEGA_TEST_PASSWORD=$(openssl rand -hex 24)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '26'
       - name: Build test container image
         run: docker compose build
       - name: Launch test environment
@@ -153,6 +156,13 @@ jobs:
         run: sh scripts/docker-account-test.sh
       - name: Test viewer uploads and nginx security boundaries
         run: python3 scripts/docker-ux-test.py "$(docker compose images -q wega)"
+      - name: Test real viewer rendering and touch gestures
+        run: node tests/viewer_live.mjs "$(docker compose images -q wega)"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: viewer-live-linux
+          path: target/viewer-live/
       - name: Test headless browser smoke & rendering
         run: sh scripts/docker-smoke.sh
       - name: Test developer tools & toolbox
@@ -194,7 +204,7 @@ jobs:
   desktop-windows:
     name: Desktop Build & Launch (Windows)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -203,15 +213,27 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: "wega-desktop-windows"
+      - name: Install pinned media SDK
+        shell: pwsh
+        run: scripts\install-windows-media.ps1
       - name: Build the desktop browser
-        run: cargo build --locked --no-default-features --features desktop,brotli-streams
+        run: cargo build --locked --no-default-features --features desktop,brotli-streams,media
       - name: Launch the browser
         shell: pwsh
         run: |
           foreach ($dll in "libEGL.dll", "libGLESv2.dll") {
             Copy-Item (Get-ChildItem "target\debug\build\mozangle-*\out\$dll" | Select-Object -First 1).FullName -Destination "target\debug\"
           }
+          python scripts\bundle-windows-media.py --destination target\debug
+          if ($LASTEXITCODE -ne 0) { throw "Media runtime bundling failed" }
           scripts\windows-launch-check.ps1 -Directory target\debug
+      - name: Real media playback and same-profile launch handoff
+        run: python scripts/windows-runtime-test.py --binary target/debug/wega.exe
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: windows-runtime-ci
+          path: target/windows-runtime-tests/
 
   ci-gate:
     name: CI Completion Gate

@@ -136,9 +136,11 @@ mod media_platform {
 
             // The packaged app supplies plugins beside its executable. Development
             // builds may use an explicitly selected SDK or the local Homebrew SDK.
-            if !plugin_dir.is_dir() {
+            if std::env::var_os("SERVO_GSTREAMER_PLUGIN_DIR").is_some() || !plugin_dir.join(if cfg!(windows) { "gstcoreelements.dll" } else { "libgstcoreelements.dylib" }).is_file() {
                 if let Some(directory)=std::env::var_os("SERVO_GSTREAMER_PLUGIN_DIR") {
                     plugin_dir=directory.into();
+                } else if cfg!(windows) {
+                    if let Some(sdk)=std::env::var_os("GSTREAMER_1_0_ROOT_MSVC_X86_64") {plugin_dir=std::path::PathBuf::from(sdk).join("lib/gstreamer-1.0");}
                 } else if cfg!(target_os="macos") {
                     for directory in ["/opt/homebrew/lib/gstreamer-1.0","/usr/local/lib/gstreamer-1.0"] {
                         if std::path::Path::new(directory).is_dir(){plugin_dir=directory.into();break;}

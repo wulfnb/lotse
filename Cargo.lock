@@ -10548,6 +10548,7 @@ dependencies = [
  "servo-malloc-size-of",
  "url",
  "webdriver",
+ "windows-sys 0.61.2",
  "winit",
  "winresource",
 ]

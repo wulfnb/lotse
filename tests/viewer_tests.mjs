@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 const filename = fileURLToPath(new URL('../docker/viewer/viewer.js', import.meta.url));
 class Element {
   constructor() { this.listeners = new Map(); this.value = ''; this.children = []; this.hidden = false; this.passwords = [{value: 'secret'}]; this.elements = {username: {value: ''}}; this.files = []; this.attributes = {}; this.classList = {toggle: (name, value) => {this[name] = value;}}; }
-  addEventListener(event, callback) { this.listeners.set(event, callback); }
+  addEventListener(event, callback) { const previous=this.listeners.get(event); this.listeners.set(event,previous?async e=>{await previous(e);return callback(e);}:callback); }
   async fire(event, detail = {}) { await this.listeners.get(event)?.({preventDefault() {}, detail, ...detail}); await new Promise(setImmediate); }
   replaceChildren() { this.children = []; }
   append(...children) { this.children.push(...children); }
@@ -21,6 +21,8 @@ class Element {
   blur() {this.focused=false;}
   click() {this.clicked=true;}
   reset() { this.resets = (this.resets || 0) + 1; }
+  dispatchEvent(event) { return this.listeners.get(event.type)?.(event); }
+  getBoundingClientRect() { return {left:0,top:0}; }
 }
 async function fixture(constructorFails = false, savedQuality = null, touch = false) {
   const elements = new Map();
@@ -38,7 +40,7 @@ async function fixture(constructorFails = false, savedQuality = null, touch = fa
   const storage = {getItem:()=>savedQuality,setItem:(key,value)=>{storage.value=value;}};
   const connection = new Element();
   const clipboard = {writeText:async value => {clipboard.value=value;}};
-  const context = vm.createContext({document, navigator:{clipboard,connection,maxTouchPoints:touch?1:0}, localStorage:storage, location: {host: 'test.local', replace: url => locations.push(url)}, fetch: async (...args) => {
+  const context = vm.createContext({document, Event, navigator:{clipboard,connection,maxTouchPoints:touch?1:0}, localStorage:storage, location: {host: 'test.local', replace: url => locations.push(url)}, fetch: async (...args) => {
     calls.push(args);
     const response = replies.shift();
     if (response instanceof Error) throw response;
@@ -47,7 +49,7 @@ async function fixture(constructorFails = false, savedQuality = null, touch = fa
     return response;
   }, FormData: class { constructor(form) { return new Map([['username', form.elements.username.value], ['password', 'new-secret']]); } }, setTimeout: (callback, delay) => { const timer = {callback, delay, active:true}; timers.push(timer); return timer; }, clearTimeout: timer => {if (timer) timer.active = false;}});
   const module = new vm.SourceTextModule(readFileSync(filename, 'utf8'), {context, identifier: filename});
-  await module.link(() => new vm.SyntheticModule(['default'], function () { this.setExport('default', RFB); }, {context}));
+  await module.link(specifier => specifier === './controls.js' ? new vm.SourceTextModule(readFileSync(new URL('../docker/viewer/controls.js', import.meta.url), 'utf8'), {context}) : new vm.SyntheticModule(['default'], function () { this.setExport('default', RFB); }, {context}));
   await module.evaluate();
   return {get, document, clients, calls, replies, locations, timers, clipboard, storage, connection};
 }
@@ -172,7 +174,7 @@ test('silent connection timeout retries with backoff and successful recovery can
   }
   await f.clients.at(-1).fire('connect');
   assert.equal(f.get('#connection-card').hidden, true);
-  assert.equal(f.timers.filter(t => t.active && t.delay !== 2000 && t.delay !== 1500).length, 0);
+  assert.deepEqual(f.timers.filter(t => t.active && t.delay !== 2000 && t.delay !== 1500).map(t=>t.delay), [1000]);
   f.replies.push(ok({}));
   await f.clients.at(-1).fire('securityfailure');
   assert.match(f.get('#connection-message').textContent, /Connection refused.*1 s/);
@@ -371,4 +373,44 @@ test('touch hints are dismissible and optional storage failure does not block co
   const f=await fixture(false,null,true);assert.equal(f.get('#touch-hint').hidden,false);
   await f.get('#dismiss-touch-hint').fire('click');assert.equal(f.get('#touch-hint').hidden,true);
   f.storage.setItem=()=>{throw new Error('Disabled');};await f.get('#dismiss-touch-hint').fire('click');
+});
+
+test('measured quality sampling pauses when hidden, respects manual modes and abandons stale clients', async()=>{
+  const f=await fixture(); const c=f.clients[0];
+  c.renderStats={pending:1,frames:1,oldestMs:300,completed:0};
+  await c.fire('connect');
+  let timer=f.timers.findLast(t=>t.active&&t.delay===1000);
+  f.document.hidden=true;timer.callback();assert.equal(c.qualityLevel,6);
+  f.document.hidden=false;
+  for(let n=0;n<2;n++) f.timers.findLast(t=>t.active&&t.delay===1000).callback();
+  assert.equal(c.qualityLevel,2);
+  f.get('#quality-mode').value='sharp';await f.get('#quality-mode').fire('change');assert.equal(c.qualityLevel,9);
+  timer=f.timers.findLast(t=>t.active&&t.delay===1000);
+  await f.get('#reconnect').fire('click');assert.equal(timer.active,false);
+  timer.callback();assert.equal(c.qualityLevel,9);
+});
+
+test('viewer navigation mode consumes local gestures and restores normal control', async()=>{
+  const f=await fixture();const c=f.clients[0],s=f.get('#screen');
+  s.clientWidth=500;s.clientHeight=400;
+  c.viewportMetrics={width:1000,height:800,scale:1,x:0,y:0};
+  c.setViewport=(...args)=>{c.transform=args;};
+  await s.fire('touchmove',{touches:[]}); // Remote interaction is untouched.
+  await s.fire('mousemove',{});
+  f.get('#pan-mode').checked=true;await f.get('#pan-mode').fire('change',{target:{checked:true}});
+  assert.equal(c.viewOnly,true);assert.deepEqual(c.transform,[.5,0,0]);
+  const event={preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;},touches:[{clientX:50,clientY:50}]};
+  await s.fire('touchstart',event);await s.fire('touchmove',{...event,touches:[{clientX:25,clientY:25}]});
+  assert.deepEqual(c.transform,[1,25,25]);
+  await s.fire('touchend',{...event,touches:[]});await s.fire('touchcancel',{...event,touches:[]});
+  await s.fire('mousedown',{...event,buttons:1,clientX:20,clientY:20});
+  await s.fire('mousemove',{...event,buttons:1,clientX:10,clientY:10});assert.deepEqual(c.transform,[1,10,10]);
+  await s.fire('mouseup',{...event,buttons:0});await s.fire('mouseleave',{...event,buttons:0});
+  await f.get('#reset-view').fire('click');assert.deepEqual(c.transform,[.5,0,0]);
+  await f.get('#pan-mode').fire('change',{target:{checked:false}});assert.equal(c.viewOnly,false);
+  f.get('#viewport-mode').value='resize';await f.get('#viewport-mode').fire('change');
+  f.get('#pan-mode').checked=true;await f.get('#reconnect').fire('click');
+  assert.equal(f.clients.at(-1).resizeSession,false,'Reconnect must keep remote resizing paused while local pan mode is enabled');
+  f.clients[1].viewportMetrics=c.viewportMetrics;f.clients[1].setViewport=c.setViewport;
+  await f.clients[1].fire('connect');
 });

@@ -215,3 +215,16 @@ remains behavioral evidence, not a Rust or shell line-coverage measurement.
 Two existing vendored Servo warnings and the native linker unwind-section warning
 remain. Application lints pass with warnings denied. Defensive error handling,
 platform paths and UI callbacks were not excluded to manufacture 100%.
+
+
+## 24 October UI continuation
+
+The latest successful local measurement covers 79 library, 34 desktop and two
+DOM allocation tests, all eight native suites and real macOS launch-event tests.
+Desktop line coverage is 10769/12933 (83.27%); core is 1591/1664 (95.61%). Python’s
+60 tests pass and the gateway retains 443/443 lines and 158/158 branches. The
+JavaScript 100% line gate passes with the new backlog and viewport controllers.
+The inventory still reports 46 first-party files incomplete/unmeasured and four
+missing platform configurations. Windows adapter cross-compilation is not a
+Windows runtime/coverage report. See the [current UI checkpoint](ui-ux-implementation.md#remaining-proposal-implementation--24-october-2026)
+for artifacts, Linux/Chrome integration checks and explicit remaining work.

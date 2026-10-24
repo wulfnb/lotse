@@ -35,7 +35,9 @@ the top; the original license headers are unchanged.
 ## GStreamer SDK discovery
 
 On macOS, `servo.rs` first loads its fixed plugin list from the app executable’s
-`lib` directory. For unbundled development builds it also accepts
+`lib` directory. Windows uses the executable directory, then the explicit override
+or `GSTREAMER_1_0_ROOT_MSVC_X86_64` SDK plugin path for development. Discovery checks
+for the actual core plugin rather than the existence of an empty directory. For unbundled development builds it also accepts
 `SERVO_GSTREAMER_PLUGIN_DIR`, then the standard Apple Silicon/Intel Homebrew
 GStreamer plugin locations. The packaged media build copies the plugin list and
 native dependency closure into the app; no installed SDK libraries are modified.
@@ -55,8 +57,14 @@ which decodes with Apple's system VideoToolbox (`vtdec`) and AudioToolbox
 (`atdec`). VP8/VP9 (`gstvpx`), Opus, Vorbis and Theora still use their BSD-licensed
 plugins. The bundler aborts if any `libx264*`, `libx265*`, `libav*`, `libswscale*`,
 `libswresample*`, `libpostproc*`, `libfaac*` or `libgstlibav*` library would be
-copied. The Windows release is built without the `media` feature and bundles no
-GStreamer plugins. Restoring `gstlibav` would require removing that guard and
+copied. Windows CI/release builds now enable media and bundle selected plugins
+and their exact x64 PE import closure from a pinned, checksum-verified SDK using
+`scripts/bundle-windows-media.py`. Required Microsoft runtime DLLs come from
+Visual Studio’s release x64 CRT REDIST directory, with a separate notice and
+per-file hashes; developer-installed system copies cannot satisfy that closure.
+The Windows plugin list adds D3D11 and Media
+Foundation alongside WASAPI. Licenses and provenance are retained; actual Windows
+execution still needs CI validation. Restoring `gstlibav` would require removing that guard and
 re-reviewing the licensing of every release artifact.
 
 

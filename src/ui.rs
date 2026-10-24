@@ -1371,7 +1371,7 @@ impl Browser {
                     if deny.clicked() {
                         answer = Some(false);
                     }
-                    if ui.button("Allow once").clicked() {
+                    if ui.button("Allow for this page").clicked() {
                         answer = Some(true);
                     }
                 });

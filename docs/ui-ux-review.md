@@ -14,6 +14,8 @@ fourth follow-up adds exact-origin permission blocks, address host emphasis and
 request-scoped viewer-to-file-picker handoff and a mobile keyboard control;
 live Docker/device checks remain.
 
+The [24 October checkpoint](ui-ux-implementation.md#remaining-proposal-implementation--24-october-2026) adds frame-backlog quality adaptation, local viewer gestures, Windows media packaging/backdrop/instance handoff, per-element media messages and a scoped Vector icon fallback. Windows runtime, physical-device checks and engine-backed permission revocation remain open.
+
 The current browser has consistent emerald styling, useful top/sidebar layouts,
 and substantial working developer tools. It still has important gaps in input
 flows, accessibility, theme coverage, and responsive behavior. Passing functional

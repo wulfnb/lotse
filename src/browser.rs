@@ -180,7 +180,12 @@ impl Browser {
         }
         crate::theme::install(
             &gui.egui_ctx,
-            profile.theme.palette(system_dark, native_theme.is_some()),
+            profile.theme.palette(
+                system_dark,
+                native_theme
+                    .as_ref()
+                    .is_some_and(|native| native.available()),
+            ),
         );
         let repaint_proxy = proxy.clone();
         let repaint_deadline = Arc::new(std::sync::Mutex::new(None::<Instant>));
@@ -451,9 +456,11 @@ impl Browser {
         self.focus_content();
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub(crate) fn open_launch_urls(&mut self, urls: Vec<url::Url>) {
         if urls.is_empty() {
+            self.window.set_visible(true);
+            self.window.focus_window();
             return;
         }
         for url in urls {
@@ -461,6 +468,7 @@ impl Browser {
         }
         self.focus_content();
         self.window.set_visible(true);
+        self.window.focus_window();
         self.window.request_redraw();
     }
 
@@ -849,7 +857,15 @@ impl Browser {
         if let Some(native) = &self.native_theme {
             native.apply(theme, dark);
         }
-        crate::theme::install(ctx, theme.palette(dark, self.native_theme.is_some()));
+        crate::theme::install(
+            ctx,
+            theme.palette(
+                dark,
+                self.native_theme
+                    .as_ref()
+                    .is_some_and(|native| native.available()),
+            ),
+        );
         let p = theme.palette(dark, false);
         let css = serde_json::to_string(&crate::capabilities::theme_stylesheet(p)).unwrap();
         let script = format!(
@@ -1688,7 +1704,8 @@ impl Browser {
                     )));
             }
             WindowEvent::ThemeChanged(_) => {
-                if self.profile().theme == crate::theme::Theme::Glass
+                if (cfg!(target_os = "windows")
+                    || self.profile().theme == crate::theme::Theme::Glass)
                     && let Some(gui) = &self.gui
                 {
                     let ctx = gui.egui_ctx.clone();
@@ -1701,7 +1718,14 @@ impl Browser {
                     self.window.request_redraw();
                 }
             }
-            WindowEvent::Focused(true) => self.focused = true,
+            WindowEvent::Focused(true) => {
+                self.focused = true;
+                #[cfg(target_os = "windows")]
+                if let Some(gui) = &self.gui {
+                    let ctx = gui.egui_ctx.clone();
+                    self.set_theme(&ctx, self.profile().theme);
+                }
+            }
             WindowEvent::Focused(false) => {
                 self.focused = false;
                 self.release_pointer();
@@ -1733,7 +1757,12 @@ impl Browser {
         self.context.prepare_for_rendering();
         gui.painter.clear(
             window.inner_size().into(),
-            if self.profile().theme.glass() && self.native_theme.is_some() {
+            if self.profile().theme.glass()
+                && self
+                    .native_theme
+                    .as_ref()
+                    .is_some_and(|native| native.available())
+            {
                 [0.0, 0.0, 0.0, 0.0]
             } else {
                 self.profile()
@@ -1842,7 +1871,11 @@ impl Browser {
                     (self.chrome.page_rect.min.x * scale) as u32 + 1,
                     (self.chrome.page_rect.min.y * scale) as u32 + 1,
                 )[3];
-                let glass = self.application.profile().theme.glass() && self.native_theme.is_some();
+                let glass = self.application.profile().theme.glass()
+                    && self
+                        .native_theme
+                        .as_ref()
+                        .is_some_and(|native| native.available());
                 if glass {
                     assert!(
                         chrome > 0 && chrome < 255,

@@ -81,6 +81,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /opt/wega/viewer /config /run/wega/browser \
     && chown browser:browser /config /run/wega/browser
 COPY docker/viewer/ /opt/wega/viewer/
+COPY docker/patch-novnc.py /opt/wega/patch-novnc.py
+RUN python3 /opt/wega/patch-novnc.py /usr/share/novnc
 COPY docker/auth-service.py docker/supervisor-watchdog.py /opt/wega/
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/supervisord.conf /etc/wega-supervisord.conf

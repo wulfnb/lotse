@@ -1,4 +1,5 @@
 import RFB from '/novnc/core/rfb.js';
+import {QualityController, ViewportController} from './controls.js';
 const status = document.querySelector('#status');
 const reconnect = document.querySelector('#reconnect');
 const screen = document.querySelector('#screen');
@@ -8,7 +9,10 @@ let rfb;
 let updatingAccount = false;
 let connectionTimer;
 let retryTimer;
+let qualityTimer;
 let retryAttempt = 0;
+let viewport;
+const adaptiveQuality = new QualityController();
 const connectionCard = document.querySelector('#connection-card');
 const connectionMessage = document.querySelector('#connection-message');
 function connectionState(message, connected = false) {
@@ -20,6 +24,7 @@ function connectionState(message, connected = false) {
 function stopTimers() {
   clearTimeout(connectionTimer);
   clearTimeout(retryTimer);
+  clearTimeout(qualityTimer);
 }
 function failed(client, message) {
   if (rfb !== client) return;
@@ -45,13 +50,13 @@ function applyQuality() {
   if (!rfb) return;
   const network = navigator.connection;
   const slow = network && (network.saveData || ['slow-2g', '2g', '3g'].includes(network.effectiveType));
-  const fast = qualityMode.value === 'fast' || (qualityMode.value === 'auto' && slow);
-  rfb.qualityLevel = fast ? 2 : qualityMode.value === 'sharp' ? 9 : 6;
-  rfb.compressionLevel = fast ? 6 : 2;
+  const level = qualityMode.value === 'auto' ? adaptiveQuality.sample(rfb.renderStats, slow) : qualityMode.value === 'sharp' ? 9 : 2;
+  rfb.qualityLevel = level;
+  rfb.compressionLevel = level <= 2 ? 6 : 2;
 }
 qualityMode.addEventListener('change', () => {
   try { localStorage.setItem('wega-viewer-quality', qualityMode.value); } catch { /* Optional preference storage. */ }
-  applyQuality();
+  adaptiveQuality.reset(false); applyQuality();
 });
 navigator.connection?.addEventListener('change', applyQuality);
 function connect() {
@@ -69,9 +74,12 @@ function connect() {
     return;
   }
   rfb = client;
+  adaptiveQuality.reset(Boolean(navigator.connection?.saveData || ['slow-2g', '2g', '3g'].includes(navigator.connection?.effectiveType)));
+  viewport = new ViewportController(client, screen);
+  viewport.enable(Boolean(document.querySelector('#pan-mode').checked));
   const mode = document.querySelector('#viewport-mode').value;
   client.scaleViewport = mode !== 'actual';
-  client.resizeSession = mode === 'resize';
+  client.resizeSession = mode === 'resize' && !viewport.active;
   applyQuality();
   connectionTimer = setTimeout(() => failed(client, "Can't reach the browser: server not responding."), 15000);
   client.addEventListener('connect', () => {
@@ -80,6 +88,13 @@ function connect() {
     retryAttempt = 0;
     connectionState('Connected', true);
     client.focus();
+    if (viewport.active) viewport.reset();
+    const sample = () => {
+      if (rfb !== client) return;
+      if (!document.hidden) applyQuality();
+      qualityTimer = setTimeout(sample, 1000);
+    };
+    qualityTimer = setTimeout(sample, 1000);
   });
   client.addEventListener('disconnect', () => failed(client, 'Connection lost.'));
   client.addEventListener('securityfailure', () => failed(client, 'Connection refused.'));
@@ -196,6 +211,8 @@ document.querySelector('#signout').addEventListener('click', async () => {
 
 const viewportMode = document.querySelector('#viewport-mode');
 viewportMode.addEventListener('change', () => {
+  document.querySelector('#pan-mode').checked = false;
+  viewport?.enable(false);
   screen.classList.toggle('actual-size', viewportMode.value === 'actual');
   if (rfb) {
     rfb.scaleViewport = viewportMode.value !== 'actual';
@@ -203,6 +220,31 @@ viewportMode.addEventListener('change', () => {
   }
   status.textContent = viewportMode.value === 'actual' ? 'Actual size: scroll to pan the desktop' : viewportMode.value === 'resize' ? 'Remote resize requested; use Fit if unsupported' : 'Fit to window';
 });
+document.querySelector('#pan-mode').addEventListener('change', event => {
+  viewport?.enable(event.target.checked);
+  if (event.target.checked) {
+    viewport?.reset();
+    status.textContent = 'Viewer pan/zoom: drag to pan, pinch to zoom. Turn off to control the page.';
+  } else { viewportMode.dispatchEvent(new Event('change')); }
+});
+document.querySelector('#reset-view').addEventListener('click', () => viewport?.reset());
+for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+  screen.addEventListener(type, event => {
+    if (!viewport?.active) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const rect = screen.getBoundingClientRect();
+    const points = Array.from(event.touches).slice(0,2).map(t=>({x:t.clientX-rect.left,y:t.clientY-rect.top}));
+    if (type === 'touchmove') viewport.move(points); else viewport.start(points);
+  }, {capture:true, passive:false});
+}
+for (const type of ['mousedown', 'mousemove', 'mouseup', 'mouseleave']) {
+  screen.addEventListener(type, event => {
+    if (!viewport?.active) return;
+    event.preventDefault(); event.stopImmediatePropagation();
+    const points = event.buttons === 1 ? [{x:event.clientX,y:event.clientY}] : [];
+    if (type === 'mousemove') viewport.move(points); else viewport.start(points);
+  }, {capture:true});
+}
 const uploadDialog = document.querySelector('#upload-dialog');
 const uploadForm = document.querySelector('#upload-form');
 const uploadNotice = document.querySelector('#upload-notice');
