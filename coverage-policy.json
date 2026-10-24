@@ -9,13 +9,17 @@
     "docker/**/*.sh",
     "scripts/**/*.py",
     "scripts/**/*.sh",
-    "scripts/**/*.rs"
+    "scripts/**/*.rs",
+    "scripts/**/*.ps1",
+    "engines/**/*.rs",
+    "engines/**/*.js"
   ],
   "test_only": [
     "src/*_tests.rs",
     "src/harness/*.rs",
     "scripts/native-tests.py",
     "scripts/macos-launch-test.py",
+    "scripts/windows-runtime-test.py",
     "scripts/docker-auth-test.py",
     "scripts/docker-*-test.sh",
     "scripts/docker-smoke.sh",
@@ -28,7 +32,10 @@
     "scripts/coverage-inventory.py",
     "scripts/coverage_sources.py",
     "scripts/docker-ux-test.py",
-    "scripts/coverage-rustc.rs"
+    "scripts/coverage-rustc.rs",
+    "scripts/windows-launch-check.ps1",
+    "scripts/windows-installer-check.ps1",
+    "engines/wega/tests/*.rs"
   ],
   "declaration_only": [
     "src/lib.rs",

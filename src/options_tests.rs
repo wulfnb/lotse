@@ -157,3 +157,35 @@ fn os_launch_urls_allow_only_declared_schemes_and_bound_batches() {
     assert_eq!(urls[0].path(), "/0");
     assert_eq!(urls[31].path(), "/31");
 }
+
+#[test]
+fn engine_options_and_diagnostics_are_explicit() {
+    use crate::engine_choice::EngineKind;
+    assert_eq!(
+        parse(&["--engine", "wega"]).unwrap().engine,
+        Some(EngineKind::Wega)
+    );
+    assert_eq!(
+        parse(&["--engine", "servo"]).unwrap().engine,
+        Some(EngineKind::Servo)
+    );
+    for args in [
+        vec!["--engine"],
+        vec!["--engine", "other"],
+        vec!["--engine", "wega", "--remote-devtools", "7000"],
+        vec!["--engine-test"],
+    ] {
+        assert!(parse(&args).is_err(), "{args:?}");
+    }
+    assert_eq!(
+        parse(&[
+            "--engine",
+            "wega",
+            "--engine-test",
+            "--profile-dir",
+            "/tmp/wega-actual-engine"
+        ])
+        .is_ok(),
+        cfg!(feature = "test-harness")
+    );
+}

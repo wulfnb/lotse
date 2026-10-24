@@ -23,7 +23,8 @@ Changing layouts keeps the existing webviews and their page state alive.
 | Windows · x64 | [Download ZIP](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Windows-x64.zip) |
 | Linux · x86_64 | [Download tar.gz](https://github.com/wulfnb/wega/releases/download/test-preview/Wega-Linux-x86_64.tar.gz) |
 
-The Windows preview does not include video or audio playback.
+The currently published Windows preview does not include video or audio playback.
+The next Windows build enables bundled media; packaged playback is checked in Windows CI before release.
 
 These links download the current `test-preview` prerelease. Linux setup requirements
 are included in the archive's README.
@@ -471,3 +472,11 @@ AudioToolbox through GStreamer's `applemedia` plugin). The app does not bundle
 FFmpeg, gst-libav, x264, x265 or other GPL or patent-encumbered codec libraries,
 and the packaging script refuses to produce a bundle that contains them. See
 [docs/licensing.md](docs/licensing.md) for details.
+
+
+The experimental second engine is built separately because its ICU dependencies
+cannot be linked with the pinned Servo release. Run
+`python3 scripts/build-wega-engine.py --debug`, then use the bottom-right engine
+selector or start with `--engine wega`. It uses [Blitz](https://github.com/DioxusLabs/blitz)
+and QuickJS-ng; Servo remains the default for everyday browsing. See the
+[engine strategy and current limits](docs/engine-strategy.md#which-engine-should-we-use-now).

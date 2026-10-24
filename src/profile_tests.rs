@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn normalization_keeps_engine_and_title_with_each_valid_address() {
+    use crate::engine_choice::EngineKind::{Servo, Wega};
+    let mut profile = Profile {
+        urls: vec!["https://".into(), "https://article.test/".into()],
+        titles: vec!["Invalid".into(), "Article".into()],
+        engines: vec![Servo, Wega],
+        ..Default::default()
+    };
+    profile.normalize();
+    assert_eq!(profile.urls, vec!["https://article.test/"]);
+    assert_eq!(profile.titles, vec!["Article"]);
+    assert_eq!(profile.engines, vec![Wega]);
+    let mut legacy: Profile = serde_json::from_str(r#"{"urls":["https://legacy.test/"]}"#).unwrap();
+    legacy.normalize();
+    assert_eq!(legacy.engines, vec![Servo]);
+}
+
+#[test]
 fn internal_links_use_only_the_wega_scheme() {
     assert_eq!(
         resolve_address("wega://bookmarks").unwrap().as_str(),

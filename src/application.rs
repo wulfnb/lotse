@@ -135,6 +135,18 @@ impl Application {
     /// Persist the open tabs as (url, title) pairs. Titles let unloaded tabs show
     /// their page name after a restart without loading the page.
     pub fn save_tabs(&mut self, tabs: Vec<(String, String)>, active: usize) -> Result<(), String> {
+        self.save_engine_tabs(
+            tabs.into_iter()
+                .map(|(url, title)| (url, title, crate::engine_choice::EngineKind::Servo))
+                .collect(),
+            active,
+        )
+    }
+    pub fn save_engine_tabs(
+        &mut self,
+        tabs: Vec<(String, String, crate::engine_choice::EngineKind)>,
+        active: usize,
+    ) -> Result<(), String> {
         if !self.writable {
             return Err(
                 "Profile has not loaded successfully; existing data will not be overwritten".into(),
@@ -143,20 +155,27 @@ impl Application {
         let selected = tabs
             .iter()
             .take(active)
-            .filter(|(url, _)| !url.starts_with("data:"))
+            .filter(|(url, _, _)| !url.starts_with("data:"))
             .count();
+        let mut new_engines = Vec::new();
         let (new_urls, new_titles): (Vec<String>, Vec<String>) = tabs
             .into_iter()
-            .filter(|(url, _)| !url.starts_with("data:"))
+            .filter(|(url, _, _)| !url.starts_with("data:"))
+            .map(|(url, title, engine)| {
+                new_engines.push(engine);
+                (url, title)
+            })
             .unzip();
         let new_active = selected.min(new_urls.len().saturating_sub(1));
         let previous_urls = std::mem::replace(&mut self.profile.urls, new_urls);
         let previous_titles = std::mem::replace(&mut self.profile.titles, new_titles);
         let previous_active = std::mem::replace(&mut self.profile.active, new_active);
+        let previous_engines = std::mem::replace(&mut self.profile.engines, new_engines);
         if let Err(error) = self.store.save(&self.profile) {
             self.profile.urls = previous_urls;
             self.profile.titles = previous_titles;
             self.profile.active = previous_active;
+            self.profile.engines = previous_engines;
             return Err(error);
         }
         Ok(())

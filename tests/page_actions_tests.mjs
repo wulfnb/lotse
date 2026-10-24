@@ -57,3 +57,39 @@ test('reader uses text content and toggles without injecting page HTML', () => {
     reader.runInContext(context); reader.runInContext(context); assert.equal(ids.size, 0);
   }
 });
+
+test('media failures show element-local feedback and safe downloads; source changes clear it',()=>{
+  const listeners=new Map(),panels=[];
+  const element=()=>({style:{},children:[],setAttribute(k,v){this[k]=v;},append(e){this.children.push(e);},remove(){this.removed=true;}});
+  const document={addEventListener:(name,fn)=>listeners.set(name,fn),createElement:element};
+  new vm.Script(readFileSync(file('media_fallback.js'),'utf8'),{filename:file('media_fallback.js')}).runInNewContext({document,URL,location:{href:'https://example.test/page'}});
+  const media={tagName:'VIDEO',error:{code:4},currentSrc:'https://example.test/movie.webm',after(p){panels.push(p);}};
+  const error=listeners.get('error');error({target:{tagName:'DIV'}});error({target:{tagName:'AUDIO'}});error({target:{tagName:'AUDIO',error:{code:1}}});assert.equal(panels.length,0);
+  error({target:media});assert.equal(panels.length,1);assert.match(panels[0].children[0].textContent,/unsupported/);assert.equal(panels[0].children[1].download,'');
+  media.error.code=2;error({target:media});assert.equal(panels[0].removed,true);assert.match(panels[1].children[0].textContent,/connection/);
+  listeners.get('loadstart')({target:media});assert.equal(panels[1].removed,true);listeners.get('loadeddata')({target:media});
+  media.currentSrc='data:video/x,x';error({target:media});assert.equal(panels.at(-1).children.length,1);
+  media.currentSrc='https://[';error({target:media});assert.equal(panels.at(-1).children.length,1);
+  media.currentSrc='';media.src='';error({target:media});assert.equal(panels.at(-1).children.length,1);
+  media.src='https://example.test/fallback.webm';error({target:media});assert.equal(panels.at(-1).children[1].href,media.src);
+});
+
+async function maskFixture({supports=false,loading=false,links=[{href:'/w/load.php?a=1'}],response='success',css='.vector-icon.test{mask-image:url(/icon.svg)}'}={}) {
+  const styles=[],listeners=new Map();let observer,fetches=0;
+  const document={readyState:loading?'loading':'complete',querySelectorAll:()=>links,head:{append(s){styles.push(s);}},addEventListener:(name,fn)=>listeners.set(name,fn),createElement:()=>({setAttribute(){}})};
+  const script=new vm.Script(readFileSync(file('mask_icons.js'),'utf8'),{filename:file('mask_icons.js')});
+  script.runInNewContext({document,CSS:{supports:()=>supports},URL,location:{href:'https://example.test/page',origin:'https://example.test'},MutationObserver:class{constructor(fn){observer=fn;}observe(){}},fetch:async()=>{fetches++;if(response==='error')throw Error('offline');return {ok:response!=='bad',text:async()=>css};}});
+  if(loading)listeners.get('DOMContentLoaded')();
+  await new Promise(setImmediate);
+  return {styles,observer,fetches:()=>fetches};
+}
+test('Vector mask fallback retires with native support and keeps original same-origin SVG/selectors',async()=>{
+  assert.equal((await maskFixture({supports:true})).fetches(),0);
+  const f=await maskFixture({loading:true,links:[{href:'https://['},{href:'https://other.test/w/load.php'},{href:'/other.css'},{href:'/w/load.php?a=1'},{href:'/w/load.php?a=1'}],css:'.vector-icon.test{mask-image:url("/icon.svg")} .vector-icon.other{mask-image:url(\'/other.svg\')} .unrelated{mask-image:url(/no.svg)} .vector-icon.nope{mask-image:none} .vector-icon.remote{mask-image:url(https://other.test/i.svg)}'});
+  assert.equal(f.fetches(),1);assert.equal(f.styles.length,1);assert.match(f.styles[0].textContent,/example.test\/icon.svg/);assert.match(f.styles[0].textContent,/background-color:transparent/);assert.doesNotMatch(f.styles[0].textContent,/unrelated|remote|nope/);
+  f.observer([{addedNodes:[{tagName:'DIV'}]}]);f.observer([{addedNodes:[{tagName:'LINK'}]}]);await new Promise(setImmediate);assert.equal(f.fetches(),1);
+  for(const response of ['bad','error']) assert.equal((await maskFixture({response})).styles.length,0);
+  assert.equal((await maskFixture({css:'x'.repeat(2097153)})).styles.length,0);
+  assert.equal((await maskFixture({css:'.vector-icon.x{mask-image:none}'})).styles.length,0);
+  assert.equal((await maskFixture({css:'.vector-icon.x{mask-image:url(https://[)}'})).styles.length,0);
+});

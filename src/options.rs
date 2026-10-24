@@ -5,6 +5,8 @@ pub struct Options {
     pub help: bool,
     pub profile_dir: Option<PathBuf>,
     pub url: Option<String>,
+    pub engine: Option<crate::engine_choice::EngineKind>,
+    pub engine_test: bool,
     pub smoke_test: bool,
     pub download_test: bool,
     pub toolbox_test: bool,
@@ -29,6 +31,7 @@ impl Options {
             || self.toolbox_test
             || self.theme_test
             || self.capabilities_test
+            || self.engine_test
     }
 
     pub fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -65,6 +68,11 @@ impl Options {
                     }
                     result.multiprocess = true;
                 }
+                "--engine" => {
+                    result.engine = Some(crate::engine_choice::EngineKind::parse(
+                        &args.next().ok_or("--engine requires servo or wega")?,
+                    )?);
+                }
                 "--webdriver-port" => {
                     result.webdriver_port = Some(
                         args.next()
@@ -86,6 +94,7 @@ impl Options {
                 "--toolbox-test" => result.toolbox_test = true,
                 "--capabilities-test" => result.capabilities_test = true,
                 "--theme-test" => result.theme_test = true,
+                "--engine-test" => result.engine_test = true,
                 "--capture" => {
                     result.capture =
                         Some(args.next().ok_or("--capture requires a PNG path")?.into())
@@ -118,7 +127,8 @@ impl Options {
         if result.help {
             return Ok(result);
         }
-        if (result.smoke_test
+        if (result.engine_test
+            || result.smoke_test
             || result.download_test
             || result.toolbox_test
             || result.theme_test
@@ -136,6 +146,7 @@ impl Options {
             result.toolbox_test,
             result.theme_test,
             result.capabilities_test,
+            result.engine_test,
         ]
         .into_iter()
         .filter(|enabled| *enabled)
@@ -143,6 +154,13 @@ impl Options {
             > 1
         {
             return Err("Choose only one native test mode".into());
+        }
+        if result.engine == Some(crate::engine_choice::EngineKind::Wega)
+            && (result.remote_devtools.is_some()
+                || result.multiprocess
+                || (result.test_mode() && !result.engine_test))
+        {
+            return Err("These engine diagnostics require Servo; omit --engine wega".into());
         }
         Ok(result)
     }

@@ -49,9 +49,10 @@ def main():
         log = f"with open({str(calls)!r},'a') as f: f.write(json.dumps([Path(sys.argv[0]).name,sys.argv[1:]])+'\\n')\n"
         # cargo-about is a port too: `--version` probes it, `generate` writes the notices.
         program('cargo', log + "if sys.argv[1:3] == ['about', '--version'] and os.environ.get('FAKE_NO_CARGO_ABOUT'): sys.exit(1)\n"
-                "if sys.argv[1:3] == ['about', 'generate'] and not os.environ.get('FAKE_EMPTY_NOTICES'): Path(sys.argv[sys.argv.index('--output-file') + 1]).write_text('<html>notices</html>')\n")
+                "if sys.argv[1:3] == ['about', 'generate'] and not os.environ.get('FAKE_EMPTY_NOTICES') and not (os.environ.get('FAKE_EMPTY_WORKER_NOTICES') and 'engines/wega/Cargo.toml' in ' '.join(sys.argv)): Path(sys.argv[sys.argv.index('--output-file') + 1]).write_text('<html>notices</html>')\n")
         program('git', "print('0123456789abcdef0123456789abcdef01234567')\n")
-        program('python3', log)
+        program('python3', log + "if 'scripts/build-wega-engine.py' in sys.argv:\n for folder in ['debug','release']:\n  p=Path.cwd()/'target'/folder/'wega-engine';p.parent.mkdir(parents=True,exist_ok=True);p.write_text('engine worker');p.chmod(0o755)\n")
+        program('codesign', log)
         program('uname', "print('Darwin')\n")
         program('supervisord', log + "assert not any(k in os.environ for k in ['BROWSER_USER','BROWSER_PASSWORD','BROWSER_PASSWORD_FILE'])\n")
         program('supervisorctl', "print('\\n'.join(f'worker{i} RUNNING pid 1' for i in range(6)))\n")
@@ -74,8 +75,11 @@ def main():
         binary.parent.mkdir(parents=True)
         binary.write_text('#!/bin/sh\nprintf "launcher:%s\\n" "$1"\n')
         binary.chmod(0o755)
+        run('scripts/package-linux.sh', success=False)
+        worker=binary.parent/'wega-engine';worker.write_text('engine worker');worker.chmod(0o755)
         run('scripts/package-linux.sh')
         package = checkout / 'dist/wega-linux-x86_64'
+        assert (package / 'libexec/wega-engine').read_text()=='engine worker'
         assert (package / 'share/applications/wega.desktop').read_text().startswith('[Desktop Entry]')
         assert subprocess.check_output([str(package / 'bin/wega'), 'literal argument'], text=True).strip() == 'launcher:literal argument'
         assert (package / 'LICENSE').read_bytes() == (checkout / 'LICENSE').read_bytes()
@@ -90,6 +94,10 @@ def main():
         run('scripts/third-party-notices.sh', [str(notices)], env=dict(base_env, FAKE_NO_CARGO_ABOUT='1'), success=False)
         run('scripts/third-party-notices.sh', [str(notices)], env=dict(base_env, FAKE_EMPTY_NOTICES='1'), success=False)
         run('scripts/third-party-notices.sh', [str(notices), '--features', 'media'], env=dict(base_env, WEGA_SOURCE_COMMIT='feedface'))
+        engine_manifest=checkout/'engines/wega/Cargo.toml';engine_manifest.parent.mkdir(parents=True);engine_manifest.write_text('[package]')
+        run('scripts/third-party-notices.sh',[str(notices)],env=dict(base_env,WEGA_SOURCE_COMMIT='feedface'))
+        assert (notices/'WEGA-ENGINE-THIRD-PARTY-NOTICES.html').is_file()
+        run('scripts/third-party-notices.sh',[str(work/'empty-worker-notices')],env=dict(base_env,FAKE_EMPTY_WORKER_NOTICES='1'),success=False)
         notice = (notices / 'NOTICE').read_text()
         assert notice.startswith((checkout / 'NOTICE').read_text())
         assert 'source commit: feedface\nCorresponding source: https://github.com/wulfnb/wega/tree/feedface' in notice

@@ -85,11 +85,14 @@ impl Browser {
                 .ok_or("Download URL has no host.")?
                 .to_owned();
             let mut cookies = String::from("# Netscape HTTP Cookie File\n");
-            for cookie in self
-                .servo
-                .site_data_manager()
-                .cookies_for_url(url.clone(), servo::CookieSource::HTTP)
-            {
+            let site_cookies = if self.is_wega() {
+                Vec::new()
+            } else {
+                self.servo
+                    .site_data_manager()
+                    .cookies_for_url(url.clone(), servo::CookieSource::HTTP)
+            };
+            for cookie in site_cookies {
                 let name = cookie.name();
                 let value = cookie.value();
                 let path = cookie.path().unwrap_or("/");

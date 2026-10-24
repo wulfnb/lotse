@@ -1,0 +1,140 @@
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use wega_engine::{Engine, Limits, NetworkPolicy, Url};
+fn page(limits: Limits) -> wega_engine::View {
+    Engine::new(limits, NetworkPolicy::default(), Arc::new(|| {}))
+        .unwrap()
+        .create_view(Url::parse("about:blank").unwrap())
+        .unwrap()
+}
+#[test]
+fn real_dom_javascript_and_cpu_pixels_share_one_document() {
+    let mut view = page(Limits::default());
+    view.set_html(r#"<!doctype html><title>Before</title><style>body{margin:0}button{border:0;background:#00ff00;width:180px;height:80px}</style><button id="counter">0</button><script>
+      const button=document.getElementById('counter');
+      if(button!==document.querySelector('#counter'))throw Error('Wrapper identity lost');
+      button.addEventListener('click',()=>{button.textContent=String(Number(button.textContent)+1);document.title='Clicked';});
+      document.addEventListener('DOMContentLoaded',()=>document.title='Ready');
+    </script>"#).unwrap();
+    view.poll();
+    assert_eq!(view.title(), "Ready", "{:?}", view.notices);
+    let frame = view.paint(200, 120, 1.0, 1.0, false).unwrap();
+    let pixel = &frame.rgba[(20 * 200 + 20) * 4..(20 * 200 + 20) * 4 + 4];
+    assert!(
+        pixel[1] > 240 && pixel[0] < 10 && pixel[2] < 10,
+        "Actual green button pixels: {pixel:?}"
+    );
+    view.click(30.0, 30.0);
+    view.poll();
+    assert_eq!(view.text("#counter").as_deref(), Some("1"));
+    assert_eq!(view.title(), "Clicked");
+    assert!(view.heap_bytes() > 0);
+    assert!(view.needs_paint());
+    view.freeze(true);
+    assert!(!view.needs_paint());
+    assert!(view.next_wakeup().is_none());
+    view.freeze(false);
+    assert!(view.needs_paint());
+}
+#[test]
+fn runaway_script_is_interrupted_and_a_fresh_page_recovers() {
+    let mut view = page(Limits {
+        script_time: Duration::from_millis(30),
+        ..Limits::default()
+    });
+    view.set_html("<title>Busy</title><script>while(true){}</script>")
+        .unwrap();
+    let start = Instant::now();
+    view.poll();
+    assert!(start.elapsed() < Duration::from_secs(2));
+    assert!(!view.notices.is_empty());
+    view.set_html("<title>Recovered</title><p>Fresh page</p>")
+        .unwrap();
+    view.poll();
+    assert_eq!(view.title(), "Recovered");
+    assert!(view.paint(100, 100, 1.0, 1.0, false).is_ok());
+}
+#[test]
+fn native_dom_budget_and_cycles_are_rejected() {
+    let mut view = page(Limits {
+        dom_nodes: 24,
+        ..Limits::default()
+    });
+    view.set_html("<body><div id=a><div id=b></div></div>")
+        .unwrap();
+    view.poll();
+    view.evaluate("let rejected=false;try{document.getElementById('b').appendChild(document.getElementById('a'));}catch{rejected=true;}if(!rejected)throw Error('DOM cycle accepted');").unwrap();
+    assert!(view.set_html(&"<div>x</div>".repeat(30)).is_err());
+    assert!(view.paint(u32::MAX, u32::MAX, 1.0, 1.0, false).is_err());
+}
+#[test]
+fn policy_blocks_host_boundaries_and_offline_requests() {
+    let p = NetworkPolicy {
+        blocked_hosts: "example.test".into(),
+        ..Default::default()
+    };
+    assert!(!p.permits(&Url::parse("https://child.example.test/").unwrap()));
+    assert!(p.permits(&Url::parse("https://notexample.test/").unwrap()));
+    assert!(!p.permits(&Url::parse("file:///tmp/private").unwrap()));
+    assert!(
+        !NetworkPolicy {
+            offline: true,
+            ..Default::default()
+        }
+        .permits(&Url::parse("https://safe.test/").unwrap())
+    );
+}
+#[test]
+fn heap_exhaustion_is_local_and_timers_pause_in_background() {
+    let mut view = page(Limits {
+        js_heap_bytes: 512 * 1024,
+        ..Limits::default()
+    });
+    view.set_html(
+        "<title>Heap cap</title><script>globalThis.leak=new Array(5000000).fill(7)</script>",
+    )
+    .unwrap();
+    view.poll();
+    assert!(!view.notices.is_empty());
+    view.set_html(
+        "<title>Waiting</title><script>setTimeout(()=>document.title='Timer fired',5)</script>",
+    )
+    .unwrap();
+    view.poll();
+    view.freeze(true);
+    std::thread::sleep(Duration::from_millis(12));
+    view.poll();
+    assert_eq!(view.title(), "Waiting");
+    view.freeze(false);
+    view.poll();
+    assert_eq!(view.title(), "Timer fired");
+}
+#[test]
+fn failed_navigation_replaces_old_content_and_policy_updates_take_effect() {
+    let engine = Engine::new(Limits::default(), NetworkPolicy::default(), Arc::new(|| {})).unwrap();
+    let mut view = engine
+        .create_view(Url::parse("about:blank").unwrap())
+        .unwrap();
+    view.set_html("<title>Old content</title><p>Private old page</p>")
+        .unwrap();
+    engine.set_policy(NetworkPolicy {
+        offline: true,
+        ..Default::default()
+    });
+    view.load(Url::parse("https://blocked.test/").unwrap())
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while view.loading && Instant::now() < deadline {
+        view.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(view.title(), "Page unavailable");
+    assert!(!view.text("body").unwrap().contains("Private old page"));
+    assert!(
+        view.notices
+            .iter()
+            .any(|message| message.contains("policy"))
+    );
+}

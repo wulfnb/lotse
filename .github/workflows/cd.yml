@@ -67,6 +67,8 @@ jobs:
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" dist/Wega-macOS-arm64.dmg
           test -f "$mount_dir/Wega.app/Contents/Info.plist"
           test -x "$mount_dir/Wega.app/Contents/MacOS/wega"
+          test -x "$mount_dir/Wega.app/Contents/MacOS/wega-engine"
+          test -s "$mount_dir/Wega.app/Contents/Resources/WEGA-ENGINE-THIRD-PARTY-NOTICES.html"
           test "$(readlink "$mount_dir/Applications")" = /Applications
           test -f "$mount_dir/Read Me.txt"
           hdiutil detach "$mount_dir"
@@ -133,8 +135,9 @@ jobs:
           mkdir -p dist
           container_id=$(docker create "${{ env.IMAGE_NAME }}:${{ github.sha }}")
           docker cp "$container_id:/usr/local/bin/wega" ./wega-linux
+          docker cp "$container_id:/usr/local/bin/wega-engine" ./wega-engine
           docker rm "$container_id"
-          chmod 755 ./wega-linux
+          chmod 755 ./wega-linux ./wega-engine
           bash scripts/package-linux.sh ./wega-linux
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -145,7 +148,7 @@ jobs:
     needs: ci-validation
     name: Package Windows (x64)
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:
@@ -157,13 +160,18 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: "wega-cd-windows"
+      - name: Install pinned media SDK
+        shell: pwsh
+        run: scripts\install-windows-media.ps1
+      - name: Build the independent Wega engine
+        run: python scripts/build-wega-engine.py
       - name: Build Windows release executable
-        run: cargo build --release --locked --no-default-features --features desktop,brotli-streams
+        run: cargo build --release --locked --no-default-features --features desktop,brotli-streams,media
       - name: Install license notice generator
         run: cargo install cargo-about --version 0.9.2 --features cli --locked
       - name: Write LICENSE, NOTICE and THIRD-PARTY-NOTICES.html
         shell: bash
-        run: bash scripts/third-party-notices.sh dist/wega-windows-x64 --no-default-features --features "desktop brotli-streams" --target x86_64-pc-windows-msvc
+        run: bash scripts/third-party-notices.sh dist/wega-windows-x64 --no-default-features --features "desktop brotli-streams media" --target x86_64-pc-windows-msvc
       - name: Package Windows ZIP archive
         shell: pwsh
         run: |
@@ -172,6 +180,7 @@ jobs:
             throw "Windows browser executable is missing; refusing an incomplete release"
           }
           Copy-Item "target\release\wega.exe" -Destination "dist\wega-windows-x64\"
+          Copy-Item "target\release\wega-engine.exe" -Destination "dist\wega-windows-x64\"
           # wega.exe links ANGLE (libEGL/libGLESv2) dynamically; without them it cannot start.
           foreach ($dll in "libEGL.dll", "libGLESv2.dll") {
             $built = Get-ChildItem "target\release\build\mozangle-*\out\$dll" | Select-Object -First 1
@@ -180,7 +189,7 @@ jobs:
             }
             Copy-Item $built.FullName -Destination "dist\wega-windows-x64\"
           }
-          foreach ($notice in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.html") {
+          foreach ($notice in "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.html", "WEGA-ENGINE-THIRD-PARTY-NOTICES.html") {
             if (!(Test-Path "dist\wega-windows-x64\$notice")) {
               throw "$notice is missing; refusing a release without license notices"
             }
@@ -188,6 +197,8 @@ jobs:
           if (Test-Path "README.md") {
             Copy-Item "README.md" -Destination "dist\wega-windows-x64\"
           }
+          python scripts\bundle-windows-media.py --destination dist\wega-windows-x64
+          if ($LASTEXITCODE -ne 0) { throw "Media runtime bundling failed" }
           Compress-Archive -Path "dist\wega-windows-x64\*" -DestinationPath "dist\Wega-Windows-x64.zip" -Force
       - name: Build Windows installer
         shell: pwsh
@@ -204,6 +215,13 @@ jobs:
       - name: Launch the packaged executable
         shell: pwsh
         run: scripts\windows-launch-check.ps1 -Directory dist\wega-windows-x64
+      - name: Test packaged media and URL handoff without installed SDK
+        run: python scripts/windows-runtime-test.py --binary dist/wega-windows-x64/wega.exe
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: always()
+        with:
+          name: windows-runtime-release
+          path: target/windows-runtime-tests/
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: windows-dist

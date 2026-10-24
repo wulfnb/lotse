@@ -13,6 +13,8 @@ pub mod theme {
 pub mod application;
 pub mod base64_text;
 pub mod deadline;
+pub mod engine_choice;
+pub mod engine_protocol;
 pub mod lifecycle;
 pub mod navigation;
 pub mod permissions;

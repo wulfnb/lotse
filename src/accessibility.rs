@@ -43,20 +43,24 @@ impl Browser {
                 self.accessibility.active = true;
                 self.accessibility.grafted = None;
                 self.gui.as_ref().unwrap().egui_ctx.enable_accesskit();
-                self.view().set_accessibility_active(false);
-                self.view().set_accessibility_active(true);
+                if let Some(view) = self.tab().view() {
+                    view.set_accessibility_active(false);
+                    view.set_accessibility_active(true);
+                }
             }
             WindowEvent::ActionRequested(request) => {
                 if request.target_tree == accesskit::TreeId::ROOT {
                     self.chrome.page_focused = request.target_node
                         == egui::Id::unique("web-page-accessibility").accesskit_id();
-                    self.view().set_focused(self.chrome.page_focused);
+                    if let Some(view) = self.tab().view() {
+                        view.set_focused(self.chrome.page_focused);
+                    }
                     self.gui
                         .as_mut()
                         .unwrap()
                         .egui_winit
                         .on_accesskit_action_request(request.clone());
-                } else {
+                } else if !self.is_wega() {
                     match serde_json::to_value(request).and_then(serde_json::from_value) {
                         Ok(request) => {
                             self.chrome.page_focused = true;

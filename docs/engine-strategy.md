@@ -1,7 +1,11 @@
 # Engine strategy: a low-memory Wega engine
 
-Status: plan, not implemented. Written 23 October 2026 to start the work; the
-open decisions at the end are for the project to make together.
+Status: **first experimental implementation**, updated 24 October 2026.
+The Blitz-based Wega engine now renders real pages in a private worker process;
+the native footer selects Servo or Wega for the active tab. Servo remains the
+default. The original design below includes future work; it does not describe a
+finished compatible browser engine. See the implementation checkpoint and the
+[engine recommendation at the bottom](#which-engine-should-we-use-now).
 
 ## Why
 
@@ -81,18 +85,128 @@ Not chosen: V8 and SpiderMonkey (fast and compatible, but heavy); DOMs written
 in JavaScript (linkedom, happy-dom) inside the VM, because they would duplicate
 the DOM Blitz already uses for style and layout.
 
+## Implementation checkpoint — 24 October 2026
+
+The agreed base is **Blitz**, with Wega owning the engine integration, JavaScript
+bindings, limits, network policy and lifecycle. Published upstream crates are
+pinned and remain unmodified; copying Servo would retain its SpiderMonkey/DOM
+architecture and would not implement this design.
+
+### Two independent builds, one browser window
+
+The first build attempt found an actual dependency conflict: Servo's pinned
+`mozjs_sys` requires ICU C API 2.1.2 and ICU 2.1, whereas Blitz 0.3.0-beta.4 requires
+ICU 2.3. They cannot resolve together in one Cargo dependency graph. We therefore
+build `engines/` with its own Cargo.lock and run one `wega-engine` worker per Wega
+tab. The browser shares a bounded, versioned private-pipe protocol with that
+worker, rather than forcing incompatible crates into one process.
+
+- `src/servo_host.rs` initializes Servo lazily. A Wega-only startup can render
+  without initializing Servo or SpiderMonkey. After Servo is first used it stays
+  process-scoped; closing its last tab does not promise to unload the engine.
+- `src/wega_page.rs` and `src/wega_ui.rs` connect actual CPU-rendered RGBA frames
+  to the existing native chrome. Navigation uses the existing NavigationPort.
+  The UI receives only the newest frame; it does not block waiting for scripts.
+- The **bottom-right engine selector** reloads the active tab in **Servo** or
+  **Wega (experimental)**. It explains that unsaved state is lost. Open-tab engine
+  choices persist alongside URL/title data, including normalization and failed
+  save handling. Internal browser pages use Servo. Per-site preferences and
+  automatic fallback are not implemented.
+- Closing or discarding a Wega tab terminates its worker. Background tabs suspend
+  scripts/timers and release CPU paint surfaces and frontend textures. Native
+  tests cover engine switching in both directions, a real page click, persistence,
+  freezing, discard/reload and closing. A stopped worker has Restart Wega and
+  Reload in Servo actions.
+
+### What the first worker actually supports
+
+Blitz 0.3.0-beta.4 supplies HTML/CSS, Stylo/Taffy/Parley and Vello CPU painting.
+Wega's QuickJS-ng/rquickjs 0.14 runtime operates on that same Rust DOM through
+checked generational node IDs. The initial bindings support queries, node
+identity, text/attributes, node creation/appending/removal, simple click listeners
+and timers. External HTML, CSS, images/fonts and classic scripts load through
+bounded asynchronous networking. Navigation, scroll, zoom, native capture and
+basic browser controls are connected. A local fixture verifies actual downloaded
+HTML/CSS/JavaScript, changed document title and rendered pixels.
+
+The native capture reports `engine: wega` and `servoInitialized: false`.
+Its reported `jsHeapBytes` is the VM's own accounting, **not process RSS or total
+page memory**. No memory target in the table below has been certified.
+
+Limits currently include a 32 MiB JS heap, 100 ms script interruption, a bounded
+microtask batch, 30,000 DOM nodes, a conservative 16 MiB DOM text allocation
+budget, 4 MiB HTML and 8 MiB resource responses, a bounded four-worker network
+queue and bounded frame storage. Rendering is capped at 30 fps; idle workers wait
+for actual input/resource/timer deadlines. These are component limits, not a
+hard total RSS limit or an OS sandbox. Decoded-image/cache budgets, total memory
+pressure and representative-site benchmarks remain work to do.
+
+**Still requires Servo:** full DOM/Web APIs, modules, fetch/XHR, forms, persistent
+storage/cookies and website sign-in, media, website accessibility and developer
+tools. Cookies and live page state do not transfer between engines. Unsupported
+APIs report errors; unsupported WebDriver page operations return
+UnsupportedOperation. WebIDL generation, detached-node collection semantics,
+comprehensive event/form behavior, Boa comparison and WPT coverage remain open.
+
+### Build and verification
+
+```sh
+python3 scripts/build-wega-engine.py --debug
+cargo run --locked -- --engine wega https://example.org/
+# Or start normally, then use the footer to switch the selected page.
+cargo test --locked --manifest-path engines/Cargo.toml --target-dir target/wega-engine
+cargo build --locked --features test-harness
+python3 scripts/native-tests.py --suite engine
+```
+
+The build script installs the helper beside the browser. Release packaging now
+includes the helper and a separate `WEGA-ENGINE-THIRD-PARTY-NOTICES.html`; Docker
+and Windows build the worker from its independent lockfile. CI checks the worker
+and the real native engine round trip. Windows checks include a packaged Wega
+capture without SDK PATH. Local macOS and Linux checks do not certify unrun
+Windows or remote release jobs.
+
+Current native evidence is under `target/remaining/wega-native/` (page, complete
+window capture and report) and `target/remaining/wega-ui.log` (native round trip).
+Local verification on 24 October 2026:
+
+| Check | Result |
+| --- | --- |
+| Core regression gate | 81 tests; 1691/1774 lines, 95.32% (95% required) |
+| Desktop unit tests | 83 library, 34 desktop and 2 binding-memory tests passed |
+| Real native integration | All nine suites passed, including both footer switches; macOS Launch Services passed |
+| Independent worker | Six page/limit/policy tests and the shared protocol test passed |
+| Tooling | 62 Python tests, gateway 443/443 lines, existing JavaScript gate and strict Rust lints passed |
+| Linux | Both executables built; authentication, smoke, toolbox, downloads, gateway, engine round trip and shell contracts passed in disposable containers |
+| macOS package | Both executables bundled, ad-hoc signature verified, Wega rendered with developer PATH/worker override removed |
+| Dependency notices | Separate Servo and Wega notices generated successfully with cargo-about 0.9.2 |
+
+The desktop line measurement is 82.77%; whole-project 100% coverage is still
+incomplete. Worker tests execute real code but currently have no separate line
+coverage export; the inventory lists those files as unmeasured. Windows runtime
+and fresh remote CI/release results remain unverified.
+
+The original phases below remain the roadmap: the process boundary and first
+static/JS spike are implemented, while full compatibility, benchmark-driven
+selection, per-site fallback and release certification remain outstanding.
+
 ## Design
+
+The sections below describe the target architecture and roadmap. The checkpoint
+above records the implemented subset; per-site choice and a common PageEngine
+trait are still future work.
 
 ### Two engines behind one boundary
 
-Wega keeps Servo and adds the Wega engine. The browser chooses per site, shows
+The target design keeps Servo and adds the Wega engine. The browser chooses per site, shows
 which engine a tab uses, and offers *Open in full engine* when a page needs
 something the Wega engine does not have yet. Over time the Wega engine becomes
 the default and Servo the fallback.
 
-Today the desktop layer calls Servo directly (about 7,300 of 15,300 non-test
-lines are Servo glue), and [architecture-decisions.md](architecture-decisions.md)
-rejects an engine trait. A new ADR replaces that with one narrow boundary. The
+At the original design checkpoint the desktop layer called Servo directly
+(about 7,300 of 15,300 non-test lines were Servo glue). The new
+[architecture decision](architecture-decisions.md) introduces the worker
+boundary; a common in-process engine trait remains a later refactor. The
 engine-free core (`src/lib.rs` modules, `NavigationPort`, `DownloadPort`,
 `PermissionPort`, `Session<T>`, `lifecycle::Activity`) stays as it is.
 
@@ -142,6 +256,9 @@ Devtools, WebDriver and the network panel stay Servo-only at first and are
 enabled through `Capabilities`.
 
 ### Inside the Wega engine
+
+This is the target design. The first worker uses bounded reqwest networking and
+handwritten basic bindings; shared cookies and generated WebIDL are not implemented.
 
 ```text
 Wega chrome ──PageView──▶ WegaView
@@ -273,3 +390,18 @@ third-party notices cover the new dependencies.
 - JS conformance: <https://test262.fyi>; `rquickjs` limits in
   `core/src/runtime/base.rs`; Boa limits in `core/engine/src/vm/runtime_limits.rs`.
 - NetSurf JavaScript bindings: `docs/jsbinding.md`, `docs/UnimplementedJavascript.md`.
+
+
+## Which engine should we use now?
+
+**Use Servo as the default for everyday browsing.** It remains the supported
+choice for interactive sites, website sign-in, forms, media, developer tools and
+website accessibility. It is a compatibility fallback, not a guarantee that every
+site or browser API works.
+
+**Choose Wega (experimental) for testing article/static pages and the initial
+JavaScript integration.** Use the bottom-right selector or `--engine wega`, and
+switch back to Servo if the page needs unsupported APIs. Keep Wega opt-in until
+reference-site compatibility and whole-process memory/CPU measurements justify
+changing the default. A separate worker and a small JS heap alone do not establish
+that the new engine uses less total memory on real sites.

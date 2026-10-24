@@ -44,3 +44,20 @@ Shell process contracts now have complete line counters; native packages still
 need platform verification. Windows directory durability, physical permissions and
 remote CI execution are not certified by macOS tests. These are open checks,
 not completed architectural results.
+
+
+## 24 October 2026: independent second-engine worker
+
+A real second engine now justifies an engine boundary. Wega reuses published
+Blitz primitives and owns a QuickJS-ng script host, networking/limits and lifecycle.
+Servo 0.7 and Blitz beta.4 require incompatible ICU versions, so the new engine
+has an independent Cargo workspace/lockfile and one private worker per tab.
+The versioned pipe protocol carries bounded commands, state and pixel frames;
+the existing NavigationPort has adapters for both engines. Servo-specific APIs
+remain guarded desktop features instead of pretending the worker implements them.
+Servo initialization is lazy; it is still process-scoped once used. Worker
+termination releases a Wega tab's process resources, and the UI retains only its
+newest frame. The native footer selects a tab's engine and reloads its page;
+URL/title/engine persistence and actual switching are integration tested. The
+existing default-free core remains independent of both rendering implementations.
+See [engine strategy](engine-strategy.md) for limitations and remaining work.

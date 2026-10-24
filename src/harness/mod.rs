@@ -3,6 +3,7 @@
 pub mod capabilities;
 pub mod coverage_ui;
 pub mod download;
+pub mod engines;
 pub mod smoke;
 pub mod theme;
 pub mod toolbox;
@@ -17,6 +18,7 @@ pub struct Harness {
     pub(crate) toolbox_test: Option<toolbox::Test>,
     pub(crate) theme_test: Option<theme::Test>,
     pub(crate) capabilities_test: Option<capabilities::Test>,
+    pub(crate) engine_test: Option<engines::Test>,
 }
 
 impl Harness {
@@ -32,6 +34,7 @@ impl Harness {
             toolbox_test: options.toolbox_test.then(toolbox::Test::new),
             theme_test: options.theme_test.then(theme::Test::new),
             capabilities_test: options.capabilities_test.then(capabilities::Test::new),
+            engine_test: options.engine_test.then(engines::Test::new),
         }
     }
     pub fn running(&self) -> bool {
@@ -40,6 +43,7 @@ impl Harness {
             || self.toolbox_test.is_some()
             || self.theme_test.is_some()
             || self.capabilities_test.is_some()
+            || self.engine_test.is_some()
     }
 }
 

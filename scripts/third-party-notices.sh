@@ -29,6 +29,17 @@ if [[ ! -s "$notices" ]]; then
   echo "cargo-about produced no $notices" >&2
   exit 1
 fi
+if [[ -f "$project_dir/engines/wega/Cargo.toml" ]]; then
+  # The worker has a separate dependency graph. Root features do not apply to it.
+  cargo about generate --locked --fail \
+    --config "$project_dir/about.toml" \
+    --manifest-path "$project_dir/engines/wega/Cargo.toml" \
+    --output-file "$out_dir/WEGA-ENGINE-THIRD-PARTY-NOTICES.html" "$project_dir/about.hbs"
+  if [[ ! -s "$out_dir/WEGA-ENGINE-THIRD-PARTY-NOTICES.html" ]]; then
+    echo 'Missing Wega engine license notices.' >&2
+    exit 1
+  fi
+fi
 cp "$project_dir/LICENSE" "$out_dir/LICENSE"
 commit="${WEGA_SOURCE_COMMIT:-${GITHUB_SHA:-}}"
 if [[ -z "$commit" ]] && command -v git >/dev/null 2>&1; then

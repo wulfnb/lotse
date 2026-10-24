@@ -11,13 +11,20 @@ if [[ ! -f "$binary" ]]; then
   echo "Binary not found at $binary. Pass path to executable as first argument." >&2
   exit 1
 fi
+engine="$(dirname "$binary")/wega-engine"
+if [[ ! -f "$engine" ]]; then
+  echo 'Wega engine worker is missing. Run python3 scripts/build-wega-engine.py first.' >&2
+  exit 1
+fi
 
 rm -rf "$dist_dir"
 mkdir -p "$dist_dir/bin" "$dist_dir/libexec" "$dist_dir/share/applications" "$dist_dir/share/icons/hicolor/256x256/apps"
 
 # The executable lives in libexec/; bin/wega is the relocatable launcher.
 cp "$binary" "$dist_dir/libexec/wega"
+cp "$engine" "$dist_dir/libexec/wega-engine"
 chmod 755 "$dist_dir/libexec/wega"
+chmod 755 "$dist_dir/libexec/wega-engine"
 
 if [[ -f "$project_dir/assets/icons/browser-icon-256.png" ]]; then
   cp "$project_dir/assets/icons/browser-icon-256.png" "$dist_dir/share/icons/hicolor/256x256/apps/wega.png"

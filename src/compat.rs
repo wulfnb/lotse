@@ -28,5 +28,13 @@ pub fn content_manager(servo: &servo::Servo) -> Rc<servo::UserContentManager> {
     manager.add_script(Rc::new(servo::UserScript::new(
         "document.addEventListener('click',e=>{const a=e.target.closest?.('a[download]');if(!a||e.defaultPrevented||e.button!==0)return;const u=new URL(a.href,location.href);if(!['http:','https:'].includes(u.protocol))return;e.preventDefault();location.href='wega://download?url='+encodeURIComponent(u.href)+'&name='+encodeURIComponent(a.getAttribute('download')||'')},false);".into(),None,
     )));
+    manager.add_script(Rc::new(servo::UserScript::new(
+        include_str!("media_fallback.js").into(),
+        None,
+    )));
+    manager.add_script(Rc::new(servo::UserScript::new(
+        include_str!("mask_icons.js").into(),
+        None,
+    )));
     manager
 }

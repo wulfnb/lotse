@@ -89,6 +89,14 @@ impl Browser {
         docs.insert("settings".into(),document("Browser settings","<p>Use the Browser settings window to manage appearance, browsing, privacy, downloads and advanced options. If it is closed, reopen it from <b>… → Browser settings</b>.</p><p>Internal documents have no access to native browser controls.</p>"));
     }
     pub fn screenshot_page(&mut self) {
+        if self.is_wega() {
+            self.notify(
+                crate::ux::Severity::Info,
+                "This page action requires Servo in this version. Use the engine selector below.",
+                None,
+            );
+            return;
+        }
         let folder = self.profile_dir.join("screenshots");
         if let Err(e) = std::fs::create_dir_all(&folder) {
             self.status = Some(e.to_string());
@@ -127,6 +135,14 @@ impl Browser {
         );
     }
     pub fn reload_without_cache(&mut self) {
+        if self.is_wega() {
+            self.notify(
+                crate::ux::Severity::Info,
+                "This page action requires Servo in this version. Use the engine selector below.",
+                None,
+            );
+            return;
+        }
         if let Some(url) = self.view().url() {
             let mut headers = http::HeaderMap::new();
             headers.insert(
@@ -142,6 +158,14 @@ impl Browser {
         }
     }
     pub fn refresh_site_data(&mut self) {
+        if self.is_wega() {
+            self.notify(
+                crate::ux::Severity::Info,
+                "This page action requires Servo in this version. Use the engine selector below.",
+                None,
+            );
+            return;
+        }
         self.features.sites = self
             .servo
             .site_data_manager()
@@ -183,6 +207,27 @@ impl Browser {
             .unwrap_or_default();
     }
     pub fn feature_ui(&mut self, ctx: &egui::Context) {
+        if self.is_wega() {
+            if self.features.settings || self.features.site_info || self.features.find_open {
+                let mut open = true;
+                let mut servo = false;
+                egui::Window::new("Wega experimental engine").open(&mut open).show(ctx,|ui|{
+                    ui.label("This engine currently supports article rendering and basic JavaScript. Site-data inspection, page find, forms, media, accessibility content and page tools require Servo.");
+                    servo=ui.button("Reload this page in Servo").clicked();
+                    ui.label("Website cookies and sign-in state are separate. Engine selection is remembered per open tab.");
+                });
+                if !open {
+                    self.features.settings = false;
+                    self.features.site_info = false;
+                    self.features.find_open = false;
+                }
+                if servo {
+                    self.switch_engine(wega::engine_choice::EngineKind::Servo);
+                }
+            }
+            return;
+        }
+
         if !self.dialogs.prompts.is_empty() {
             let fresh = self.prepare_dialog(ctx, "engine-confirmation");
             let mut answer = if crate::ux::escape(ctx) {
@@ -308,7 +353,7 @@ impl Browser {
                         0 => {
                             ui.heading("Appearance");
                             for theme in crate::theme::Theme::ALL {
-                                if self.native_theme.is_none() && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
+                                if !self.native_theme.as_ref().is_some_and(|native| native.available()) && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
                                 ui.horizontal(|ui| {
                                     let palette=theme.palette(self.window.theme()!=Some(winit::window::Theme::Light), false);
                                     for color in [palette.chrome,palette.selected,palette.accent] {
@@ -388,8 +433,8 @@ impl Browser {
                     ui.label("Runs in every subsequently loaded page. Changes apply after reload.");
                     ui.add(egui::TextEdit::multiline(&mut self.features.script_source).code_editor().desired_rows(7).desired_width(f32::INFINITY));
                     if ui.button("Apply script").clicked(){let mut policy=self.profile().policy.clone();policy.user_script=self.features.script_source.clone();self.apply(wega::application::Command::Policy(policy));
-                        if let Some(script)=self.features.script.take(){self.content_manager.remove_script(script);}
-                        if !self.profile().policy.user_script.trim().is_empty(){let script=std::rc::Rc::new(servo::UserScript::new(self.profile().policy.user_script.clone(),None));self.content_manager.add_script(script.clone());self.features.script=Some(script);}
+                        if let Some(script)=self.features.script.take(){self.content_manager.get().unwrap().remove_script(script);}
+                        if !self.profile().policy.user_script.trim().is_empty(){let script=std::rc::Rc::new(servo::UserScript::new(self.profile().policy.user_script.clone(),None));self.content_manager.get().unwrap().add_script(script.clone());self.features.script=Some(script);}
                         self.changed();self.notify(crate::ux::Severity::Success,"User script saved. Reload a page to apply.",None);
                     }
 
@@ -484,7 +529,7 @@ impl Browser {
                     if let Some(origin) = current.as_ref().filter(|url| matches!(url.scheme(),"http"|"https")).map(|url| url.origin().ascii_serialization()) {
                         ui.separator();
                         ui.collapsing("Site permissions",|ui| {
-                        ui.weak("Blocked features will not prompt on this page or its frames. Other requests ask each time. Close pages already using device access when blocking it.");
+                        ui.weak("Allow lasts for the requesting page. Blocking denies queued and new permission prompts; it does not revoke access already granted. Restart Wega to end active device access. Remembered access is unavailable in this version.");
                         for (feature,label) in [("Notifications","Notifications"),("Geolocation","Location"),("Camera","Camera"),("Microphone","Microphone"),("Push","Push messages"),("Midi","MIDI devices"),("Speaker","Audio output"),("DeviceInfo","Device information"),("BackgroundSync","Background sync"),("Bluetooth","Bluetooth"),("PersistentStorage","Persistent storage"),("Gamepad","Gamepads"),("ScreenWakeLock(Screen)","Screen wake lock")] {
                             let mut blocked = self.profile().policy.permission_blocked(&origin,feature);
                             if ui.checkbox(&mut blocked,format!("Block {label}")).changed() {

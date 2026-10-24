@@ -61,7 +61,10 @@ impl Browser {
                 "window.__wegaUserScript = 73".into(),
                 None,
             ));
-            self.content_manager.add_script(script.clone());
+            self.content_manager
+                .get()
+                .unwrap()
+                .add_script(script.clone());
             self.features.script = Some(script);
             let fixture = self
                 .view()
@@ -172,7 +175,7 @@ impl Browser {
             50=>"window.__permissionResult==='denied'".to_owned(),
             51=>{let fixture=test.fixture.replace("127.0.0.1","localhost");self.navigate(&fixture);self.feature_stage(52);return;}
             52=>"window.__permissionResult='pending';setTimeout(()=>{Notification.requestPermission().then(value=>{window.__permissionResult=value})},0);true".to_owned(),
-            53=>{if self.pending_permission().is_none(){return;}self.coverage_click(&["Allow once"],|b,ui|b.ui(ui));assert!(self.pending_permission().is_none());self.feature_stage(54);return;}
+            53=>{if self.pending_permission().is_none(){return;}self.coverage_click(&["Allow for this page"],|b,ui|b.ui(ui));assert!(self.pending_permission().is_none());self.feature_stage(54);return;}
             54=>"window.__permissionResult==='granted'".to_owned(),
             55=>{let url=test.fixture.replace("/capabilities.html","/auth-fixture-cancel");self.navigate(&url);self.feature_stage(56);return;}
             56=>{if self.dialogs.authentications.is_empty(){return;}self.coverage_click(&["Cancel"],|b,ui|b.ui(ui));assert!(self.dialogs.authentications.is_empty());assert!(self.chrome.password.is_empty());self.feature_stage(57);return;}
