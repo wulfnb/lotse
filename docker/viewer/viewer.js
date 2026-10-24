@@ -6,40 +6,91 @@ const dialog = document.querySelector('#clipboard-dialog');
 const text = document.querySelector('#clipboard-text');
 let rfb;
 let updatingAccount = false;
+let connectionTimer;
+let retryTimer;
+let retryAttempt = 0;
+const connectionCard = document.querySelector('#connection-card');
+const connectionMessage = document.querySelector('#connection-message');
+function connectionState(message, connected = false) {
+  status.textContent = message;
+  connectionMessage.textContent = message;
+  connectionCard.hidden = connected;
+  reconnect.hidden = connected;
+}
+function stopTimers() {
+  clearTimeout(connectionTimer);
+  clearTimeout(retryTimer);
+}
+function failed(client, message) {
+  if (rfb !== client) return;
+  stopTimers();
+  // Invalidate before disconnect: noVNC may dispatch disconnect synchronously.
+  rfb = undefined;
+  client?.disconnect();
+  if (updatingAccount) { connectionState('Reconnecting browser controls…'); return; }
+  const delay = [1, 2, 5, 10][Math.min(retryAttempt++, 3)];
+  connectionState(`${message} Reconnecting in ${delay} s…`);
+  retryTimer = setTimeout(connect, delay * 1000);
+  fetch('/auth/account', {cache: 'no-store'}).then(response => {
+    if (response.status === 401) { stopTimers(); location.replace('/login.html'); }
+  }).catch(() => {});
+}
+const qualityMode = document.querySelector('#quality-mode');
+qualityMode.value = 'auto';
+try {
+  const saved = localStorage.getItem('wega-viewer-quality');
+  if (['auto', 'sharp', 'fast'].includes(saved)) qualityMode.value = saved;
+} catch { /* Storage may be disabled by the browser. */ }
+function applyQuality() {
+  if (!rfb) return;
+  const network = navigator.connection;
+  const slow = network && (network.saveData || ['slow-2g', '2g', '3g'].includes(network.effectiveType));
+  const fast = qualityMode.value === 'fast' || (qualityMode.value === 'auto' && slow);
+  rfb.qualityLevel = fast ? 2 : qualityMode.value === 'sharp' ? 9 : 6;
+  rfb.compressionLevel = fast ? 6 : 2;
+}
+qualityMode.addEventListener('change', () => {
+  try { localStorage.setItem('wega-viewer-quality', qualityMode.value); } catch { /* Optional preference storage. */ }
+  applyQuality();
+});
+navigator.connection?.addEventListener('change', applyQuality);
 function connect() {
-  reconnect.hidden = true;
-  status.textContent = 'Connecting…';
-  if (rfb) rfb.disconnect();
+  stopTimers();
+  const previous = rfb;
+  rfb = undefined;
+  previous?.disconnect();
+  connectionState('Connecting to your browser…');
   screen.replaceChildren();
-  const client = new RFB(screen, `wss://${location.host}/websockify`, {shared: true});
+  let client;
+  try {
+    client = new RFB(screen, `wss://${location.host}/websockify`, {shared: true});
+  } catch {
+    failed(undefined, "Can't reach the browser.");
+    return;
+  }
   rfb = client;
   const mode = document.querySelector('#viewport-mode').value;
   client.scaleViewport = mode !== 'actual';
   client.resizeSession = mode === 'resize';
-  client.qualityLevel = 6;
-  client.compressionLevel = 2;
+  applyQuality();
+  connectionTimer = setTimeout(() => failed(client, "Can't reach the browser: server not responding."), 15000);
   client.addEventListener('connect', () => {
     if (rfb !== client) return;
-    status.textContent = 'Connected';
+    stopTimers();
+    retryAttempt = 0;
+    connectionState('Connected', true);
     client.focus();
   });
-  client.addEventListener('disconnect', () => {
+  client.addEventListener('disconnect', () => failed(client, 'Connection lost.'));
+  client.addEventListener('securityfailure', () => failed(client, 'Connection refused.'));
+  client.addEventListener('clipboard', event => {
     if (rfb !== client) return;
-    status.textContent = 'Disconnected';
-    reconnect.hidden = false;
-    if (updatingAccount) return;
-    fetch('/auth/account', {cache: 'no-store'}).then(response => {
-      if (response.status === 401) location.replace('/login.html');
-    }).catch(() => {});
+    text.value = event.detail.text;
+    document.querySelector('#clipboard-offer').hidden = false;
   });
-  client.addEventListener('securityfailure', () => {
-    if (rfb !== client) return;
-    status.textContent = 'Connection refused';
-    reconnect.hidden = false;
-  });
-  client.addEventListener('clipboard', event => {text.value = event.detail.text;});
 }
 reconnect.addEventListener('click', connect);
+document.querySelector('#retry-connection').addEventListener('click', connect);
 document.querySelector('#fullscreen').addEventListener('click', async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -119,7 +170,10 @@ accountForm.addEventListener('submit', async event => {
     status.textContent = 'Account updated';
     accountDialog.close();
     setTimeout(connect, 700);
-  } catch (error) { accountNotice.textContent = error.message; }
+  } catch (error) {
+    accountNotice.textContent = error.message;
+    if (!rfb) connect();
+  }
   finally {
     for (const input of accountForm.querySelectorAll('input[type="password"]')) input.value = '';
     button.disabled = false;
@@ -143,8 +197,10 @@ document.querySelector('#signout').addEventListener('click', async () => {
 const viewportMode = document.querySelector('#viewport-mode');
 viewportMode.addEventListener('change', () => {
   screen.classList.toggle('actual-size', viewportMode.value === 'actual');
-  rfb.scaleViewport = viewportMode.value !== 'actual';
-  rfb.resizeSession = viewportMode.value === 'resize';
+  if (rfb) {
+    rfb.scaleViewport = viewportMode.value !== 'actual';
+    rfb.resizeSession = viewportMode.value === 'resize';
+  }
   status.textContent = viewportMode.value === 'actual' ? 'Actual size: scroll to pan the desktop' : viewportMode.value === 'resize' ? 'Remote resize requested; use Fit if unsupported' : 'Fit to window';
 });
 const uploadDialog = document.querySelector('#upload-dialog');
@@ -174,3 +230,159 @@ uploadForm.addEventListener('submit', async event => {
 });
 document.querySelector('#close-upload').addEventListener('click', () => uploadDialog.close());
 uploadDialog.addEventListener('close', () => { uploadForm.reset(); uploadCsrf = ''; rfb?.focus(); });
+
+const toolbar = document.querySelector('header');
+let toolbarTimer;
+function revealToolbar() {
+  toolbar.classList.toggle('toolbar-hidden', false);
+  clearTimeout(toolbarTimer);
+  toolbarTimer = setTimeout(() => toolbar.classList.toggle('toolbar-hidden', true), 2000);
+}
+document.addEventListener('pointermove', event => { if (event.clientY < 60) revealToolbar(); });
+document.addEventListener('pointerdown', event => { if (event.clientY < 60) revealToolbar(); });
+document.addEventListener('keydown', event => {
+  if (event.altKey && event.shiftKey && event.code === 'KeyV') {
+    event.preventDefault();
+    revealToolbar();
+    document.querySelector('#clipboard').focus();
+  }
+});
+document.addEventListener('fullscreenchange', () => toolbar.classList.toggle('toolbar-hidden', true));
+revealToolbar();
+
+// Paste is supplied by the user's paste gesture; do not read the local clipboard in the background.
+screen.addEventListener('paste', event => {
+  const value = event.clipboardData?.getData('text/plain');
+  if (!rfb || !value) return;
+  event.preventDefault();
+  rfb.clipboardPasteFrom(value);
+});
+document.querySelector('#copy-local').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(text.value);
+    document.querySelector('#clipboard-offer').hidden = true;
+    status.textContent = 'Copied to this computer';
+  } catch {
+    rfb?.blur();
+    dialog.showModal();
+    text.focus(); text.select();
+    status.textContent = 'Select and copy the text manually';
+  }
+});
+document.querySelector('#dismiss-copy').addEventListener('click', () => {
+  document.querySelector('#clipboard-offer').hidden = true;
+});
+
+const fileRequest = document.querySelector('#file-request');
+const chooserFiles = document.querySelector('#chooser-files');
+let pendingFileRequest;
+async function pollFileRequest() {
+  try {
+    const response = await fetch('/auth/chooser', {cache:'no-store'});
+    if (!response.ok) return;
+    const next = (await response.json()).request;
+    const changed = next?.id !== pendingFileRequest?.id;
+    pendingFileRequest = next;
+    fileRequest.hidden = !pendingFileRequest;
+    if (pendingFileRequest && changed) {
+      document.querySelector('#file-request-label').textContent = `${pendingFileRequest.origin} is asking for a file. Choose here or drop files onto the browser.`;
+      chooserFiles.multiple = pendingFileRequest.multiple;
+      chooserFiles.accept = pendingFileRequest.extensions.filter(value => /^[a-zA-Z0-9]+$/.test(value)).map(value => '.' + value).join(',');
+    }
+  } catch { /* A disconnected viewer retries on the next poll. */ }
+  finally { setTimeout(pollFileRequest, 1500); }
+}
+setTimeout(pollFileRequest, 1500);
+document.querySelector('#choose-local').addEventListener('click', () => { chooserFiles.value=''; chooserFiles.click(); });
+async function completeFileRequest(files) {
+  const request = pendingFileRequest;
+  if (!request) return;
+  const button = document.querySelector('#choose-local');
+  button.disabled = true;
+  try {
+    if (files.length > 32 || files.some(file => file.size > 32 * 1024 * 1024) || (!request.multiple && files.length > 1)) throw new Error('Choose at most 32 files, each 32 MiB or smaller.');
+    const token = (await loadAccount()).csrf;
+    const paths = [];
+    for (const file of files) {
+      const response = await fetch('/auth/upload', {method:'POST',headers:{'Content-Type':'application/octet-stream','X-CSRF-Token':token,'X-Upload-Name':encodeURIComponent(file.name)},body:file});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Upload failed.');
+      paths.push(result.path);
+    }
+    const response = await fetch('/auth/chooser', {method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':token},body:JSON.stringify({id:request.id,paths})});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'The file chooser could not accept the upload.');
+    if (pendingFileRequest?.id === request.id) { pendingFileRequest=undefined;fileRequest.hidden=true; }
+    status.textContent = files.length ? 'File sent to the page' : 'File selection cancelled';
+  } catch (error) { document.querySelector('#file-request-label').textContent=error.message; }
+  finally { button.disabled=false; }
+}
+chooserFiles.addEventListener('change', () => { const files=Array.from(chooserFiles.files); if (files.length) return completeFileRequest(files); });
+document.querySelector('#cancel-file-request').addEventListener('click', () => completeFileRequest([]));
+screen.addEventListener('dragover', event => {
+  if (pendingFileRequest && Array.from(event.dataTransfer?.types || []).includes('Files')) event.preventDefault();
+});
+screen.addEventListener('drop', event => {
+  const files = Array.from(event.dataTransfer?.files || []);
+  if (!pendingFileRequest || !files.length) return;
+  event.preventDefault();
+  return completeFileRequest(files);
+});
+
+const remoteKeyboard = document.querySelector('#remote-keyboard');
+const keyboardButton = document.querySelector('#keyboard');
+let keyboardValue = '';
+function resetKeyboard() {
+  keyboardValue = '_'.repeat(32);
+  remoteKeyboard.value = keyboardValue;
+  remoteKeyboard.setSelectionRange(keyboardValue.length, keyboardValue.length);
+}
+keyboardButton.addEventListener('click', () => {
+  if (document.activeElement === remoteKeyboard) { remoteKeyboard.blur(); return; }
+  rfb?.blur(); resetKeyboard(); remoteKeyboard.focus();
+});
+remoteKeyboard.addEventListener('focus', () => {
+  keyboardButton.setAttribute('aria-pressed','true');
+  if (rfb) rfb.focusOnClick = false;
+});
+remoteKeyboard.addEventListener('blur', () => {
+  keyboardButton.setAttribute('aria-pressed','false');
+  if (rfb) rfb.focusOnClick = true;
+});
+remoteKeyboard.addEventListener('input', () => {
+  if (!rfb) { resetKeyboard(); return; }
+  const before = Array.from(keyboardValue), after = Array.from(remoteKeyboard.value);
+  let common = 0;
+  while (common < before.length && common < after.length && before[common] === after[common]) common++;
+  for (let index=common;index<before.length;index++) rfb.sendKey(0xff08,'Backspace');
+  for (const character of after.slice(common)) {
+    const code=character.codePointAt(0);
+    rfb.sendKey(code === 10 ? 0xff0d : code <= 255 ? code : 0x01000000 + code);
+  }
+  keyboardValue = remoteKeyboard.value;
+  if (!after.length || after.length > 256) resetKeyboard();
+});
+remoteKeyboard.addEventListener('keydown', event => {
+  const special = {Enter:0xff0d,Tab:0xff09,Escape:0xff1b,ArrowLeft:0xff51,ArrowUp:0xff52,ArrowRight:0xff53,ArrowDown:0xff54};
+  let key = special[event.key];
+  if (!key && (event.ctrlKey || event.metaKey) && !event.altKey && Array.from(event.key || '').length === 1) {
+    const code = event.key.codePointAt(0);
+    key = code <= 255 ? code : 0x01000000 + code;
+  }
+  if (!rfb || !key) return;
+  event.preventDefault();
+  const modifiers = [[event.ctrlKey,0xffe3,'ControlLeft'],[event.altKey,0xffe9,'AltLeft'],[event.shiftKey,0xffe1,'ShiftLeft'],[event.metaKey,0xffeb,'SuperLeft']].filter(item=>item[0]);
+  for (const [,symbol,code] of modifiers) rfb.sendKey(symbol,code,true);
+  rfb.sendKey(key,event.code);
+  for (const [,symbol,code] of modifiers.reverse()) rfb.sendKey(symbol,code,false);
+});
+screen.addEventListener('mousedown', event => {
+  if (document.activeElement === remoteKeyboard) event.preventDefault();
+});
+try {
+  if (navigator.maxTouchPoints > 0 && !localStorage.getItem('wega-touch-hint')) document.querySelector('#touch-hint').hidden=false;
+} catch { /* The hint remains optional if device storage is unavailable. */ }
+document.querySelector('#dismiss-touch-hint').addEventListener('click', () => {
+  document.querySelector('#touch-hint').hidden=true;
+  try { localStorage.setItem('wega-touch-hint','seen'); } catch { /* Optional preference. */ }
+});

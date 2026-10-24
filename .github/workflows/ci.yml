@@ -191,9 +191,31 @@ jobs:
         if: always()
         run: docker compose down -v
 
+  desktop-windows:
+    name: Desktop Build & Launch (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: "wega-desktop-windows"
+      - name: Build the desktop browser
+        run: cargo build --locked --no-default-features --features desktop,brotli-streams
+      - name: Launch the browser
+        shell: pwsh
+        run: |
+          foreach ($dll in "libEGL.dll", "libGLESv2.dll") {
+            Copy-Item (Get-ChildItem "target\debug\build\mozangle-*\out\$dll" | Select-Object -First 1).FullName -Destination "target\debug\"
+          }
+          scripts\windows-launch-check.ps1 -Directory target\debug
+
   ci-gate:
     name: CI Completion Gate
-    needs: [lint, core-matrix, desktop-macos, docker-integration]
+    needs: [lint, core-matrix, desktop-macos, desktop-windows, docker-integration]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all checks passed

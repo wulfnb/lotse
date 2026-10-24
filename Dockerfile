@@ -26,7 +26,7 @@ RUN --mount=type=cache,id=servo-registry-${TARGETARCH},target=/usr/local/cargo/r
         cargo install cargo-about --locked --features cli --version "${CARGO_ABOUT_VERSION}"; \
     fi
 WORKDIR /src
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml Cargo.lock build.rs ./
 COPY vendor ./vendor
 COPY src ./src
 COPY assets/icons/browser-icon-256.png ./assets/icons/browser-icon-256.png
@@ -86,7 +86,8 @@ COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY docker/supervisord.conf /etc/wega-supervisord.conf
 COPY docker/openbox.xml /etc/wega-openbox.xml
 COPY --chmod=755 docker/entrypoint.sh docker/start-browser.sh /usr/local/bin/
-ENV DISPLAY=:99 \
+ENV WEGA_FILE_HANDOFF_DIR=/run/wega/chooser \
+    DISPLAY=:99 \
     XDG_RUNTIME_DIR=/run/wega/browser \
     XDG_CONFIG_HOME=/config/.config \
     XDG_CACHE_HOME=/config/.cache \

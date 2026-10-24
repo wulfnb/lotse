@@ -131,3 +131,29 @@ fn build_capability_validation_is_independent_of_the_engine() {
         .is_err()
     );
 }
+
+#[test]
+fn os_launch_urls_allow_only_declared_schemes_and_bound_batches() {
+    let values = [
+        "https://example.test/a?q=1",
+        "file:///tmp/some%20page.html",
+        "http://localhost:8123/",
+        "wega://settings",
+        "javascript:alert(1)",
+        "data:text/html,x",
+        "ftp://example.test/",
+        "--profile-dir",
+        "not a URL",
+    ];
+    let input: Vec<_> = values.iter().map(|value| (*value).into()).collect();
+    let urls = external_launch_urls(&input);
+    assert_eq!(urls.len(), 3);
+    assert_eq!(urls[0].as_str(), values[0]);
+    assert_eq!(urls[1].as_str(), values[1]);
+    let mut input = vec![format!("https://example.test/{}", "x".repeat(8192))];
+    input.extend((0..100).map(|number| format!("https://example.test/{number}")));
+    let urls = external_launch_urls(&input);
+    assert_eq!(urls.len(), 32);
+    assert_eq!(urls[0].path(), "/0");
+    assert_eq!(urls[31].path(), "/31");
+}

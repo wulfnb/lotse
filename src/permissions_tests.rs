@@ -106,3 +106,32 @@ fn admission_bounds_total_and_per_origin_queues() {
     let full: Vec<String> = (0..MAX_PENDING).map(|i| i.to_string()).collect();
     assert!(!admit(full.iter().map(String::as_str), "new"));
 }
+
+#[test]
+fn site_setting_resolves_only_matching_queued_requests_once() {
+    let answers = Rc::new(RefCell::new(Vec::new()));
+    let mut requests = Permissions::default();
+    requests.push(
+        "https://a.test".into(),
+        "Camera".into(),
+        Responder(1, answers.clone()),
+    );
+    requests.push(
+        "https://a.test".into(),
+        "Microphone".into(),
+        Responder(2, answers.clone()),
+    );
+    requests.push(
+        "https://b.test".into(),
+        "Camera".into(),
+        Responder(3, answers.clone()),
+    );
+    requests.resolve("https://a.test", "Camera", false);
+    requests.resolve("https://a.test", "Camera", false);
+    assert_eq!(*answers.borrow(), vec![(1, false)]);
+    let (id, origin, feature) = requests.front().unwrap();
+    assert_eq!((origin, feature), ("https://a.test", "Microphone"));
+    requests.answer(id, true);
+    drop(requests);
+    assert_eq!(*answers.borrow(), vec![(1, false), (2, true), (3, false)]);
+}

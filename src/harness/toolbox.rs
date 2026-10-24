@@ -1202,8 +1202,12 @@ impl Browser {
         if stage == 69 && elapsed > Duration::from_millis(700) {
             let [list, details] = self.tools.network_rects;
             assert!(
-                list.is_positive() && details.is_positive() && list.right() <= details.left(),
-                "Request details are beside the request list: {list:?} {details:?}"
+                list.is_positive()
+                    && details.is_positive()
+                    && (list.right() <= details.left()
+                        || list.bottom() <= details.top()
+                        || details.bottom() <= list.top()),
+                "Request details do not overlap the request list: {list:?} {details:?}"
             );
             assert!(
                 self.profile_dir

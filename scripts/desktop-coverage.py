@@ -100,6 +100,11 @@ def main(argv=None):
                     failed_suites = [f"native {item['suite']} (exit {item['exit_code']})" for item in native_results if item['exit_code']]
                     failures.extend(failed_suites or [f'native test runner (exit {result.returncode})'])
                     failures.append(f'native logs: {native_output}')
+                if sys.platform == 'darwin':
+                    result = subprocess.run([sys.executable, str(ROOT / 'scripts/macos-launch-test.py'), '--binary', binaries[-1], '--output', str(native_output / 'macos-launch')], cwd=ROOT, env=env)
+                    status |= bool(result.returncode)
+                    if result.returncode:
+                        failures.append(f'macOS Launch Services (exit {result.returncode}); logs: {native_output / "macos-launch"}')
                 profile_errors = [str(path) for path in native_output.rglob('browser.log') if 'LLVM Profile Error:' in path.read_text()]
                 if profile_errors:
                     print('Invalid profiler capture: ' + ', '.join(profile_errors), file=sys.stderr)

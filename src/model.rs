@@ -22,12 +22,12 @@ impl Theme {
     ];
     pub fn name(self) -> &'static str {
         match self {
-            Self::Glass => "macOS Glass · Auto",
+            Self::Glass => "Auto",
             Self::GlassLight => "Glass Light",
             Self::GlassDark => "Glass Dark",
             Self::Midnight => "Midnight",
             Self::Paper => "Paper",
-            Self::Emerald => "Wega · Emerald Glass",
+            Self::Emerald => "Emerald",
         }
     }
     pub fn glass(self) -> bool {
@@ -116,6 +116,9 @@ pub struct Policy {
     pub allowed_hosts: String,
     pub offline: bool,
     pub allow_window_changes: bool,
+    pub show_performance: bool,
+    pub blocked_site_permissions:
+        std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     pub user_script: String,
     pub search_engine: SearchEngine,
     pub search_template: String,
@@ -129,6 +132,8 @@ impl Default for Policy {
             allowed_hosts: String::new(),
             offline: false,
             allow_window_changes: false,
+            show_performance: false,
+            blocked_site_permissions: Default::default(),
             user_script: String::new(),
             search_engine: SearchEngine::default(),
             search_template: String::new(),
@@ -137,6 +142,43 @@ impl Default for Policy {
     }
 }
 impl Policy {
+    /// Blocks apply to one canonical top-level web origin, including its frames.
+    pub fn permission_blocked(&self, origin: &str, feature: &str) -> bool {
+        let Ok(url) = url::Url::parse(origin) else {
+            return false;
+        };
+        matches!(url.scheme(), "http" | "https")
+            && url.origin().ascii_serialization() == origin
+            && self
+                .blocked_site_permissions
+                .get(origin)
+                .is_some_and(|features| features.contains(feature))
+    }
+    pub fn set_permission_blocked(&mut self, origin: &str, feature: &str, blocked: bool) {
+        let Ok(url) = url::Url::parse(origin) else {
+            return;
+        };
+        if !matches!(url.scheme(), "http" | "https") || url.origin().ascii_serialization() != origin
+        {
+            return;
+        }
+        if blocked {
+            if self.blocked_site_permissions.len() >= 512
+                && !self.blocked_site_permissions.contains_key(origin)
+            {
+                return;
+            }
+            self.blocked_site_permissions
+                .entry(origin.into())
+                .or_default()
+                .insert(feature.into());
+        } else if let Some(features) = self.blocked_site_permissions.get_mut(origin) {
+            features.remove(feature);
+            if features.is_empty() {
+                self.blocked_site_permissions.remove(origin);
+            }
+        }
+    }
     /// The effective template. An invalid custom template falls back to the default engine.
     pub fn search_template(&self) -> &str {
         match self.search_engine.template() {
@@ -203,3 +245,16 @@ pub use presentation::*;
 #[cfg(test)]
 #[path = "model_tests.rs"]
 mod tests;
+
+/// Byte range of the actual host in a canonical HTTP(S) URL. Credentials and paths
+/// must never be mistaken for the host when painting the address field.
+pub fn address_host_range(address: &str) -> Option<std::ops::Range<usize>> {
+    let url = url::Url::parse(address).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.as_str() != address
+        || url.host_str().is_none()
+    {
+        return None;
+    }
+    Some(url[..url::Position::BeforeHost].len()..url[..url::Position::AfterHost].len())
+}

@@ -58,3 +58,29 @@ plugins. The bundler aborts if any `libx264*`, `libx265*`, `libav*`, `libswscale
 copied. The Windows release is built without the `media` feature and bundles no
 GStreamer plugins. Restoring `gstlibav` would require removing that guard and
 re-reviewing the licensing of every release artifact.
+
+
+## Servo 0.7.0 DOM memory-report allocation fix
+
+`servo-script-bindings/` is the published `servo-script-bindings` 0.7.0 crate,
+including its MPL-2.0 source headers and BSD-licensed bundled parser sources.
+`mem.rs` and `codegen/codegen.py` are modified. No installed Cargo sources are
+changed.
+
+The DOM vtable generator previously used the Box allocation-size callback for
+all interfaces, including weak-referenceable interfaces reflected from `Rc<T>`.
+`Rc::into_raw` points at the value after its reference-count header, so querying
+an allocator with that pointer is invalid. Linux ARM64 debug toolbox measurement
+aborted with an arithmetic overflow; release arithmetic can obscure such errors.
+
+Generated vtables now select the allocation kind. Rc-backed values acquire a
+short-lived strong reference and delegate to the existing Rc measurement trait,
+which measures the allocation base and contained values. Dropping the temporary
+reference preserves the DOM owner's original count. Box-backed values retain
+the direct callback. The patch does not clamp sizes or disable overflow checks.
+
+`cargo test --features test-harness --test servo-dom-memory` runs regressions for
+Box and aligned Rc allocations and ownership preservation. A portable Python
+regression executes the actual vtable generator for both interface kinds. The
+real native toolbox suite remains the end-to-end memory-report check. Remove
+this patch when the pinned upstream crate makes the same allocation distinction.

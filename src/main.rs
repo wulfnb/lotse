@@ -13,12 +13,15 @@ mod debug_driver;
 mod debug_model;
 mod debugger_ui;
 mod devtools_ui;
+mod file_handoff;
 use wega::downloads;
 mod downloads_ui;
 mod engine;
 mod input;
 mod inspector_probes;
 mod inspector_ui;
+#[cfg(target_os = "macos")]
+mod mac_application;
 mod native_media;
 mod native_notifications;
 mod native_theme;
@@ -62,10 +65,16 @@ struct App {
     browser: Option<Browser>,
     proxy: winit::event_loop::EventLoopProxy<Wake>,
     failure: Option<String>,
+    #[cfg(target_os = "macos")]
+    pending_open: Vec<url::Url>,
+    #[cfg(target_os = "macos")]
+    open_events: mac_application::OpenEvents,
 }
 
 impl ApplicationHandler<Wake> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "macos")]
+        self.open_events.register();
         if self.browser.is_some() {
             return;
         }
@@ -82,7 +91,14 @@ impl ApplicationHandler<Wake> for App {
             .map_err(|e| e.to_string())
             .and_then(|window| Browser::new(window, event_loop, self.proxy.clone(), &self.options));
         match result {
-            Ok(browser) => self.browser = Some(browser),
+            Ok(browser) => {
+                self.browser = Some(browser);
+                #[cfg(target_os = "macos")]
+                self.browser
+                    .as_mut()
+                    .unwrap()
+                    .open_launch_urls(std::mem::take(&mut self.pending_open));
+            }
             Err(error) => {
                 self.failure = Some(error);
                 event_loop.exit();
@@ -91,6 +107,17 @@ impl ApplicationHandler<Wake> for App {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: Wake) {
+        #[cfg(target_os = "macos")]
+        if let Wake::OpenUrls(addresses) = &event {
+            let urls = wega::options::external_launch_urls(addresses);
+            if let Some(browser) = &mut self.browser {
+                browser.open_launch_urls(urls);
+            } else {
+                self.pending_open
+                    .extend(urls.into_iter().take(32 - self.pending_open.len()));
+            }
+            return;
+        }
         if let Some(browser) = &mut self.browser {
             browser.sync_tool_window(event_loop);
             match &event {
@@ -212,11 +239,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         .install_default()
         .map_err(|_| std::io::Error::other("Cannot install TLS provider"))?;
     let event_loop = EventLoop::<Wake>::with_user_event().build()?;
+    #[cfg(target_os = "macos")]
+    let open_events = mac_application::install(event_loop.create_proxy());
     let mut app = App {
         options,
         browser: None,
         proxy: event_loop.create_proxy(),
         failure: None,
+        #[cfg(target_os = "macos")]
+        pending_open: Vec::new(),
+        #[cfg(target_os = "macos")]
+        open_events,
     };
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.failure {

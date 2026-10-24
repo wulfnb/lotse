@@ -220,5 +220,26 @@ class ContinuousCounterTests(unittest.TestCase):
             result = subprocess.check_output([str(profiler), 'show', '--all-functions', '--counts', str(next(root.glob('*.profraw')))], text=True)
             self.assertIn('Function count: 1', result)
 
+class SourceFingerprintTests(unittest.TestCase):
+    def test_vendor_generator_and_embedded_script_changes_invalidate_measurement(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'src/lib.rs', 'src/reader.js',
+                         'vendor/bindings/mem.rs', 'vendor/bindings/codegen.py']:
+                file = root / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text('original')
+            before = fingerprint(root)
+            cache = root / 'vendor/bindings/__pycache__/generated.py'
+            cache.parent.mkdir()
+            cache.write_text('generated cache')
+            self.assertEqual(fingerprint(root), before)
+            for name in ['src/reader.js', 'vendor/bindings/mem.rs', 'vendor/bindings/codegen.py']:
+                file = root / name
+                file.write_text('changed')
+                self.assertNotEqual(fingerprint(root), before, name)
+                file.write_text('original')
+
+
 if __name__ == '__main__':
     unittest.main()

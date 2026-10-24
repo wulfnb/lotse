@@ -15,6 +15,8 @@ pub struct Test {
     pub output: Option<PathBuf>,
     pub frame_checked: bool,
     final_result: Rc<RefCell<Option<bool>>>,
+    scheme_result: Rc<RefCell<Option<bool>>>,
+    scheme_requested: bool,
 }
 impl Test {
     pub fn new() -> Self {
@@ -27,6 +29,8 @@ impl Test {
             output: None,
             frame_checked: false,
             final_result: Rc::new(RefCell::new(None)),
+            scheme_result: Rc::new(RefCell::new(None)),
+            scheme_requested: false,
         }
     }
 }
@@ -63,6 +67,35 @@ impl Browser {
             && test.frame_checked
             && test.since.elapsed() > Duration::from_millis(650)
         {
+            let result = test.scheme_result.clone();
+            let actual = result.borrow_mut().take();
+            match actual {
+                None => {
+                    if test.scheme_requested {
+                        return;
+                    }
+                    self.harness.theme_test.as_mut().unwrap().scheme_requested = true;
+                    let expected = self
+                        .profile()
+                        .theme
+                        .dark(self.window.theme() != Some(winit::window::Theme::Light));
+                    self.view().evaluate_javascript(
+                        format!(
+                            "matchMedia('(prefers-color-scheme: dark)').matches === {expected}"
+                        ),
+                        move |value| {
+                            *result.borrow_mut() =
+                                Some(matches!(value, Ok(servo::JSValue::Boolean(true))));
+                        },
+                    );
+                    return;
+                }
+                Some(passed) => assert!(
+                    passed,
+                    "Website color scheme follows {:?}",
+                    self.profile().theme
+                ),
+            }
             let index = test.index + 1;
             self.harness.theme_test.as_mut().unwrap().index = index;
             if index < Theme::ALL.len() {
@@ -115,6 +148,7 @@ impl Browser {
         let test = self.harness.theme_test.as_mut().unwrap();
         test.output = Some(self.profile_dir.join(format!("theme-{theme:?}.png")));
         test.frame_checked = false;
+        test.scheme_requested = false;
         test.since = Instant::now();
         self.window.request_redraw();
     }

@@ -245,7 +245,9 @@ class AuthFailureAndProcessTests(AuthHelpers, unittest.TestCase):
         handler.send_header = lambda *_: None
         handler.end_headers = lambda: None
         handler.wfile = io.BytesIO()
-        handler.reply(204)
+        with patch.object(handler.wfile, 'write', side_effect=BrokenPipeError) as write:
+            handler.reply(204)
+            write.assert_not_called()
         self.assertEqual(handler.wfile.getvalue(), b'')
         handler.log_message('sensitive message')
         auth.ATTEMPTS.clear()
@@ -481,6 +483,23 @@ class ConcurrencyAndTransportTests(AuthHelpers, unittest.TestCase):
         auth.UnixHTTPServer(str(path), auth.Handler).server_close()
         self.assertFalse(path.exists())
 
+    @unittest.skipIf(os.name == 'nt', 'Unix sockets')
+    def test_gateway_queues_a_page_load_of_concurrent_auth_checks(self):
+        # nginx sends one /verify per asset; the viewer loads ~40 modules at once over
+        # HTTP/2, and a refused check fails a module (502 -> 500) and the whole viewer.
+        import socket
+        path = auth.DIRECTORY / 'burst.sock'
+        server = auth.UnixHTTPServer(str(path), auth.Handler)
+        self.addCleanup(server.server_close)
+        clients = []
+        for _ in range(64):
+            client = socket.socket(socket.AF_UNIX)
+            self.addCleanup(client.close)
+            client.setblocking(False)
+            client.connect(str(path))  # Not yet accepted: waits in the listen queue.
+            clients.append(client)
+        self.assertEqual(len(clients), 64)
+
 
 WATCHDOG_SPEC = importlib.util.spec_from_file_location('wega_watchdog', Path(__file__).resolve().parents[1] / 'docker/supervisor-watchdog.py')
 watchdog = importlib.util.module_from_spec(WATCHDOG_SPEC)
@@ -555,6 +574,82 @@ class SupervisorWatchdogTests(unittest.TestCase):
         with patch('sys.stdin', io.StringIO('')), contextlib.redirect_stdout(io.StringIO()) as output:
             runpy.run_path(WATCHDOG_SPEC.origin, run_name='__main__')
         self.assertEqual(output.getvalue(), 'READY\n')
+
+class ChooserTests(AuthHelpers, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.chooser = Path(self.temporary.name) / 'chooser'
+        self.chooser.mkdir()
+        patcher = patch.object(auth, 'CHOOSER', self.chooser)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def publish(self, **changes):
+        value = dict(id='a'*32, expires=int(time.time())+60, multiple=False, origin='https://example.test', extensions=['txt'])
+        value.update(changes)
+        (self.chooser / 'current.json').write_text(json.dumps(value))
+        return value
+
+    def test_chooser_requires_session_csrf_origin_and_current_request(self):
+        self.publish()
+        self.assertEqual(self.request('/auth/chooser')[0],401)
+        token=auth.new_session();csrf=auth.SESSIONS[token]['csrf']
+        self.assertEqual(self.request('/auth/chooser',token=token)[1]['request']['id'],'a'*32)
+        data={'id':'a'*32,'paths':[]}
+        self.assertEqual(self.request('/auth/chooser',data,token,'wrong')[0],403)
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf,origin='https://evil.test')[0],403)
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf)[0],200)
+        self.assertEqual(json.loads((self.chooser/('reply-'+'a'*32+'.json')).read_text())['paths'],[])
+        self.assertIsNone(auth.chooser_request())
+        self.assertEqual(self.request('/auth/chooser',data,token,csrf)[0],400)
+        self.assertEqual(self.request('/auth/chooser',dict(data,id='b'*32),token,csrf)[0],400)
+
+    def test_only_uploaded_files_can_reach_the_picker(self):
+        self.publish()
+        path=auth.save_upload('example.txt',b'file')
+        for paths in [[str(self.chooser/'current.json')],['/etc/passwd'],[None],[str(path),str(path)],'invalid']:
+            with self.assertRaises(ValueError):auth.choose_uploaded_files({'id':'a'*32,'paths':paths})
+        auth.choose_uploaded_files({'id':'a'*32,'paths':[str(path)]})
+        self.publish(id='b'*32,multiple=True)
+        auth.choose_uploaded_files({'id':'b'*32,'paths':[str(path),str(path)]})
+        for changes in [dict(expires=0),dict(id='../evil'),dict(multiple='yes'),dict(origin=None),dict(extensions=['x'*257])]:
+            self.publish(**changes);self.assertIsNone(auth.chooser_request())
+        (self.chooser/'current.json').write_text('invalid')
+        self.assertIsNone(auth.chooser_request())
+        (self.chooser/'current.json').unlink()
+        self.assertIsNone(auth.chooser_request())
+
+    def test_chooser_metadata_and_file_guards_fail_closed(self):
+        self.publish(origin='x'*9000)
+        self.assertIsNone(auth.chooser_request())
+        self.publish(extensions=None)
+        self.assertIsNone(auth.chooser_request())
+        self.publish()
+        auth.UPLOADS.mkdir(exist_ok=True)
+        missing=auth.UPLOADS/'file-missing'/'missing.txt'
+        with self.assertRaisesRegex(ValueError,'unavailable'):
+            auth.choose_uploaded_files({'id':'a'*32,'paths':[str(missing)]})
+        folder=auth.UPLOADS/'file-folder'/'directory'
+        folder.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError,'unavailable'):
+            auth.choose_uploaded_files({'id':'a'*32,'paths':[str(folder)]})
+
+    def test_chooser_atomic_claim_and_publication_failure(self):
+        snapshot=self.publish()
+        marker=self.chooser/('accepted-'+'a'*32)
+        marker.write_bytes(b'')
+        # Another request claims the chooser after our manifest snapshot.
+        with patch.object(auth,'chooser_request',return_value=snapshot):
+            with self.assertRaisesRegex(ValueError,'already answered'):
+                auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        marker.unlink()
+        with patch.object(auth,'atomic',side_effect=OSError('disk full')):
+            with self.assertRaisesRegex(OSError,'disk full'):
+                auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        self.assertFalse(marker.exists(),'Failed publication must permit a safe retry')
+        self.assertIsNotNone(auth.chooser_request())
+        auth.choose_uploaded_files({'id':'a'*32,'paths':[]})
+        self.assertTrue(marker.exists())
 
 
 if __name__ == '__main__':

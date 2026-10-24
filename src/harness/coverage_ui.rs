@@ -117,13 +117,28 @@ impl Browser {
         assert!(self.features.script.is_none());
         self.coverage_click(&["Open developer diagnostics"], feature);
         assert!(self.features.diagnostics);
+        assert!(
+            !self.features.settings,
+            "Diagnostics replaces the settings sheet"
+        );
         self.features.diagnostics = false;
+        self.features.settings = true;
         self.features.settings_section = 2;
         self.coverage_click(&["Review cookies and stored sites"], feature);
         assert!(self.features.site_info);
+        assert!(
+            !self.features.settings,
+            "Site data replaces the settings sheet"
+        );
         self.features.site_info = false;
+        self.features.settings = true;
         self.coverage_click(&["Clear browsing data…", "Cancel"], feature);
         assert!(!self.features.clear_data);
+        assert!(
+            !self.features.settings,
+            "Data confirmation replaces the settings sheet"
+        );
+        self.features.settings = true;
         self.coverage_click(&["Clear browsing data…", "Clear data"], feature);
         assert!(!self.features.clear_data);
         assert!(self.profile().history.is_empty());
@@ -231,6 +246,8 @@ impl Browser {
         let tabs = self.session().tabs().len();
         key(self, "t", command);
         assert_eq!(self.session().tabs().len(), tabs + 1);
+        assert_eq!(self.tab().url(), "wega://newtab");
+        assert!(self.chrome.page_focused && !self.chrome.focus_address);
         key(self, "1", command);
         assert_eq!(self.view().id(), original);
         key(self, "9", command);
@@ -341,6 +358,7 @@ impl Browser {
             title: "Coverage library fixture".into(),
             url: "http://127.0.0.1/coverage-history".into(),
             visited_at: chrono::Utc::now().timestamp() as u64,
+            visit_count: 0,
         }));
         self.chrome.show_history = true;
         self.chrome.show_bookmarks = false;
@@ -402,6 +420,10 @@ impl Browser {
         self.features.settings_section = 3;
         self.coverage_click(&["Open download manager"], render);
         assert!(self.download_ui.open);
+        assert!(
+            !self.features.settings,
+            "Downloads replaces the settings sheet"
+        );
         self.download_ui.open = false;
         self.features.settings = false;
         self.features.find_open = true;

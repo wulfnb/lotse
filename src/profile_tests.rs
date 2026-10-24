@@ -110,7 +110,10 @@ fn address_schemes_local_files_and_invalid_hosts() {
         "file:///tmp/a%20b.html"
     );
     #[cfg(windows)]
-    assert!(resolve_address("/tmp/a b.html").is_err());
+    assert_eq!(
+        resolve_address("/tmp/a b.html").unwrap(),
+        crate::model::Policy::default().search_url("/tmp/a b.html")
+    );
     assert!(resolve_address("about:blank").is_ok());
     assert!(resolve_address("about:config").is_err());
     assert!(resolve_address("https://[").is_err());
@@ -333,5 +336,65 @@ fn discard_timeout_defaults_to_thirty_minutes_for_old_profiles() {
     assert_eq!(
         profile.policy.search_engine,
         crate::model::SearchEngine::Google
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_file_associations_open_absolute_paths_instead_of_searching() {
+    assert_eq!(
+        resolve_address(r"C:\Users\Alice\some page.html")
+            .unwrap()
+            .as_str(),
+        "file:///C:/Users/Alice/some%20page.html"
+    );
+    assert_eq!(
+        resolve_address(r"\\fileserver\share\some page.html")
+            .unwrap()
+            .as_str(),
+        "file://fileserver/share/some%20page.html"
+    );
+}
+
+#[test]
+fn shortcuts_keep_bookmarks_then_rank_frequent_pages_without_duplicates() {
+    let page = |url: &str, visit_count| Bookmark {
+        title: url.into(),
+        url: url.into(),
+        visited_at: 0,
+        visit_count,
+    };
+    let mut profile = Profile {
+        bookmarks: vec![page("https://saved.test/", 0)],
+        history: vec![
+            page("https://recent.test/", 1),
+            page("https://saved.test/", 4),
+            page("https://frequent.test/", 8),
+        ],
+        ..Profile::default()
+    };
+    for number in 0..10 {
+        profile
+            .history
+            .push(page(&format!("https://{number}.test/"), 1));
+    }
+    let shortcuts = profile.new_tab_shortcuts();
+    assert_eq!(shortcuts.len(), 8);
+    assert_eq!(shortcuts[0].url, "https://saved.test/");
+    assert_eq!(shortcuts[1].url, "https://frequent.test/");
+    assert_eq!(shortcuts[2].url, "https://recent.test/");
+    assert_eq!(
+        shortcuts
+            .iter()
+            .filter(|page| page.url == "https://saved.test/")
+            .count(),
+        1
+    );
+    let old: Profile =
+        serde_json::from_str(r#"{"history":[{"title":"Old","url":"https://old.test/"}]}"#).unwrap();
+    assert_eq!(old.history[0].visit_count, 0);
+    assert_eq!(
+        old.new_tab_shortcuts().last().unwrap().url,
+        "https://old.test/"
     );
 }

@@ -2,7 +2,17 @@
 
 Implementation status: all 16 findings now have code changes. See
 [implementation and verification](ui-ux-implementation.md). The observations
-below describe the original pre-change experience.
+below describe the original pre-change experience. The [23 October second-pass
+proposals](ui-ux-proposals.md#implementation-status--23-october-2026) have their own
+implementation status and remaining backlog; the original 16-item completion
+claim does not apply to that newer backlog. Continued implementation now includes
+the address-bar site panel, theme swatches, compact tabs and explicit viewer
+clipboard actions. The third follow-up adds new-tab tiles, About, Network layout
+changes, quality presets and a Windows installer definition; see the implementation
+log for validation limits, particularly the unrun Windows installer checks. The
+fourth follow-up adds exact-origin permission blocks, address host emphasis and
+request-scoped viewer-to-file-picker handoff and a mobile keyboard control;
+live Docker/device checks remain.
 
 The current browser has consistent emerald styling, useful top/sidebar layouts,
 and substantial working developer tools. It still has important gaps in input
@@ -286,3 +296,24 @@ and keyboard task testing are required in addition to palette checks.
 Keep the existing pointer, layout, console, debugger, history and profile checks.
 Add tests for user outcomes above; broad line coverage cannot substitute for
 usability, visual review or assistive-technology validation.
+
+
+### 23 October CI follow-up
+
+The original implementation and proposal follow-ups were committed as `7d6b1bc`.
+The subsequent [CI corrections and continued work](ui-ux-implementation.md#ci-corrections-and-continued-work--23-october-2026)
+track the missing Docker build script, chooser coverage gaps and macOS navigation
+race separately from the remaining platform/device validation. New-tab keyboard
+focus and Windows associated-file path handling are included in this follow-up.
+
+
+### Subsequent remaining-work follow-up
+
+The CI corrections were committed as `6256600` before further work. The next
+follow-up adds persisted most-visited shortcut ranking and macOS URL/HTML bundle
+associations and launch-event delivery. It also fixes the pinned Servo Rc/Box
+allocation mismatch behind the Linux Memory crash; the fresh Linux ARM64 toolbox
+and runtime/shell regressions now pass. See the latest
+[implementation checkpoint](ui-ux-implementation.md#allocation-reports-and-remaining-ui-work--23-october-2026)
+for final validation and outstanding device, Windows and release work. This does
+not mark the entire second-pass proposal complete.

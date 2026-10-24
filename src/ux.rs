@@ -101,6 +101,59 @@ pub fn open_path(path: &Path, reveal: bool) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Could not open {}: {e}", path.display()))
 }
+/// Launch only after the existing external-application confirmation.
+pub fn open_external(url: &url::Url) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn ShellExecuteW(
+                window: *mut std::ffi::c_void,
+                operation: *const u16,
+                file: *const u16,
+                parameters: *const u16,
+                directory: *const u16,
+                show: i32,
+            ) -> isize;
+        }
+        let target: Vec<u16> = std::ffi::OsStr::new(url.as_str())
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+        // No command interpreter or arguments: the OS resolves the confirmed URI.
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+        if result <= 32 {
+            return Err(format!(
+                "Could not open external application (Windows error {result})."
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let launcher = if cfg!(target_os = "macos") {
+            "/usr/bin/open"
+        } else {
+            "xdg-open"
+        };
+        std::process::Command::new(launcher)
+            .arg(url.as_str())
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("Could not open external application: {error}"))
+    }
+}
+
 pub fn compact(width: f32) -> bool {
     width < 1100.0
 }
@@ -129,6 +182,7 @@ impl crate::browser::Browser {
         true
     }
     pub(crate) fn finish_dialog(&mut self, ctx: &egui::Context) {
+        self.chrome.file_handoff = None;
         if self.chrome.dialog_key.take().is_some() {
             if let Some(id) = self.chrome.dialog_previous_focus.take() {
                 ctx.memory_mut(|m| m.request_focus(id));

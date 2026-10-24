@@ -21,6 +21,7 @@ that check here.
 - `browser-icon.png`: 1024 px master export.
 - `browser-icon-256.png`: embedded native window and sidebar icon.
 - `BrowserIcon.icns`: macOS 16–1024 px / Retina exports.
+- `BrowserIcon.ico`: Windows executable icon (16–256 px PNG entries), embedded by `build.rs`.
 - `docker/viewer/favicon.png`: 64 px web icon.
 - `docker/viewer/apple-touch-icon.png`: 180 px web icon.
 

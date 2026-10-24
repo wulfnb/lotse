@@ -7,7 +7,7 @@ The default build remains WebRender/GL. The presence of a delegate method or Car
 | Unload confirmation | Native confirmation consumes Servo's `request_unload` responder for navigation. Closing a tab/window still drops the view directly; a proper engine close/unload handshake remains required. |
 | Favicons | Engine raster images appear in tabs, bookmarks and history. Up to 128 URL favicons persist at bounded thumbnail size. |
 | Web notifications | WebView and worker delegates submit through macOS UserNotifications after OS authorization. Site permission remains separate. Requires `.app` identity. Delivery, OS UI, notification actions and click callbacks have not been integration tested. |
-| Navigation rules/external apps | Configurable host allow/block rules, domain-boundary matching, confirmation before opening mailto/tel/sms/zoommtg in macOS. Host restrictions are not a secure kiosk mode. |
+| Navigation rules/external apps | Configurable host allow/block rules, domain-boundary matching, confirmation before opening external URI schemes through macOS open, Windows ShellExecuteW or Linux xdg-open. Windows/Linux dispatch still needs runtime validation. Host restrictions are not a secure kiosk mode. |
 | Request interception | Real HTTP/HTTPS interception blocks configured hosts and offline requests, including subresources. This is a host blocker, not an Adblock filter-list implementation. Arbitrary outgoing header mutation is not exposed by this hook. |
 | Internal pages | Registered unprivileged `wega://newtab`, `history`, `bookmarks`, `settings` protocol. History/bookmark HTML is escaped and served with a restrictive CSP. Native settings are in the browser menu. |
 | Protocol registration | Approval consumes Servo's registration responder; approved schemes navigate through Servo. Registrations last for this browser process. |
@@ -26,6 +26,7 @@ The default build remains WebRender/GL. The presence of a delegate method or Car
 | Custom requests | Reload without cache uses UrlRequest custom headers. Servo 0.7's public UrlRequest has URL and headers only; custom method/body cannot be implemented through this API. |
 | Clear tab history | Settings calls WebView.clear_session_history. |
 | WebDriver | Opt-in loopback W3C transport from Mozilla's webdriver crate. Sessions, URL/title/source, navigation, script evaluation with JSON arguments, handles/selection and screenshots. Navigation uses WebView operations and actual load/traversal completion callbacks; page source uses Servo.execute_webdriver_command with a supported script command. Other endpoints explicitly return UnsupportedOperation; not a complete Selenium implementation. |
+| Memory allocation reports | Patched pinned Servo DOM vtables to distinguish Box and Rc allocations: Rc value pointers include a preceding reference-count header and cannot be passed directly to allocator-size callbacks. Ownership/alignment regressions pass. The real toolbox Memory probe now passes in a fresh Linux ARM64 debug/test-harness build, together with all Linux runtime/shell checks. macOS native measurement also passes; Ubuntu x86_64 release CI must rerun after push. |
 | WebRender tools | Settings offers profiler, texture cache, render targets and capture via native Servo calls. |
 | GStreamer media | Enabled by default. Real WebM video and WAV audio decoding/playback are integration tested. macOS packaging includes the explicit plugin list and dependent libraries. GStreamer SDK, pkgconf and libnice-gstreamer were installed on the development Mac. macOS uses frame uploads; accelerated-media initialization is not invoked because the exposed API has no CGL context representation. Codec/site compatibility still follows Servo and the bundled plugins. |
 | Multiprocess | Optional Cargo `multiprocess` feature plus `--multiprocess` and early content-process dispatch. Experimental; this is not a claim of sandboxing or one OS process for every site. |
@@ -74,3 +75,10 @@ python3 tests/media_smoke.py 'target/Wega.app/Contents/MacOS/wega'
 ```
 
 `--no-default-features --features brotli-streams` builds without media; the packaging equivalent is `scripts/package-macos.sh --debug --no-media`. The media packager copies libraries before rewriting their install names and ad-hoc signing the copies. Installed SDK libraries remain untouched. Each profile keeps its GStreamer registry under `engine/`, and startup loads Servo's explicit plugin list rather than scanning unrelated SDK plugins. Physical-device APIs and DRM are outside this playback test.
+
+### Website icon rendering (23 October UI review)
+
+Wikipedia interface icons were observed as solid black squares in the review
+capture `docs/ui-ux-2026-10-23/wikipedia.jpg`. CSS mask support is a suspected
+cause, not a confirmed diagnosis. A minimal fixture and comparison with the next
+Servo release remain required; browser chrome changes do not resolve this gap.

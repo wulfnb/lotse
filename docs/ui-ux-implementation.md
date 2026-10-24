@@ -1,6 +1,10 @@
 # UI/UX implementation — 22 October 2026
 
 All 16 findings from [the review](ui-ux-review.md) have implementation changes.
+The original follow-ups were committed as `7d6b1bc`; later CI fixes and continued
+work are recorded at the end. Commit statements in earlier checkpoints describe
+those checkpoints, not the current Git state.
+The [23 October follow-up](#23-october-follow-up) tracks the separate second-pass backlog.
 The original review describes the pre-change experience. This document records
 the resulting behavior and the limits of verification; it does not certify every
 OS, assistive technology or device configuration.
@@ -95,3 +99,432 @@ Before claiming cross-platform accessibility or device certification, run:
   those configurations when these changes are pushed.
 
 No commits or pushes were made for this implementation.
+
+## 23 October follow-up
+
+The [second-pass proposals](ui-ux-proposals.md#implementation-status--23-october-2026)
+are a separate backlog from the original 16 findings. This checkpoint implements
+A1, A2, A7, B1, the B4 modal alternative, the B5 wording/row changes, and parts of
+B2, B6 and C2. C4 has platform implementations with Windows/Linux runtime testing
+still outstanding. The proposal status table records every deferred item.
+
+### Resulting behavior
+
+- Viewer startup has a visible state card and a 15-second connection deadline.
+  Failed connections retry after 1, 2, 5 and at most 10 seconds; Try again cancels
+  the pending attempt. Old clients cannot overwrite a newer connection state.
+  Expired sessions return to sign-in. A classic bootstrap catches module load
+  failure and exposes Reload page even when `viewer.js` cannot initialize.
+- Viewer controls float over a full-height remote desktop. View and Account use
+  menus; controls hide after two idle seconds and stay visible while focused,
+  hovered or a menu is open. Alt+Shift+V reveals them and focuses Clipboard.
+- Sign-in has a mint primary action, accessible show/hide-password toggle,
+  Caps Lock warning and actionable authentication/rate-limit messages.
+- New and existing Servo views receive the effective light/dark appearance.
+  The native theme suite checks website `prefers-color-scheme` through
+  `matchMedia` during every theme switch and still checks page-state preservation.
+- CPU/RAM is off by default and enabled through Settings → Advanced → Show
+  performance in status bar. Existing profiles use the new default. Ordinary
+  status/footer text no longer displays Servo/WebRender/version strings.
+- Settings uses a centered modal sheet with constrained width and scrolling,
+  dimmed backdrop, explicit Close, Escape/backdrop dismissal and restored focus.
+  Opening diagnostics, site data, Downloads or a data-clear confirmation closes
+  settings so the next surface is immediately operable.
+  The tab-layout controls show the active selection; theme names are simplified.
+- Site-data categories use Cookies, Local storage and Session storage. Rows put
+  the site first and destructive Remove last; cookie headings use plain language.
+  HttpOnly/Secure diagnostic fields remain available in the developer inspector.
+- Windows builds without media show a startup warning; the website and README
+  disclose the missing playback capability. This does not add Windows codecs.
+- Confirmed external URI actions use ShellExecuteW on Windows and xdg-open on
+  Linux, retaining macOS open. No shell command string is assembled from a URI.
+
+### Verification and remaining limits
+
+Evidence is recorded under `target/ui-ux-followup/` and
+`target/coverage/javascript/`. The runtime overlay uses an existing Linux engine
+binary with current gateway/viewer/runtime files; it is not a fresh Linux build.
+Validated in this follow-up:
+
+- 71 core/library tests and 33 desktop unit tests passed.
+- JavaScript regression suite and its unchanged 100% line-coverage gate passed,
+  including loader failure/deadline, retry backoff, stale clients, account rotation,
+  toolbar focus and sign-in controls. See `target/coverage/javascript/lcov.info`.
+- Native smoke, six-theme and capabilities suites passed with isolated profiles;
+  the final theme/capabilities run also checks website appearance and settings
+  Escape dismissal. Captures include `capabilities-settings.png`, site-data and
+  all six theme frames. Settings and Paper captures were visually inspected.
+- Docker HTTPS gateway regression passed using the local runtime overlay:
+  authentication, private uploads, CSRF/Origin/size guards, nginx syntax, restricted
+  listeners and current viewer/bootstrap assets. Disposable containers were removed.
+- Chrome static-viewer visual checks confirmed the mint sign-in action, show/hide
+  password control, floating controls/View menu and missing-module Reload card.
+  This deliberately omitted noVNC to test loader failure; it does not certify a
+  live remote connection or container restart through Cloudflare/Traefik.
+- Test-harness desktop build, Clippy with warnings denied for application targets,
+  formatting and diff whitespace checks passed. Vendored Servo warnings and the
+  existing macOS linker unwind-size warning remain; they were not suppressed.
+
+No commits, pushes, release publication or changes to the user's profile were
+made. Real screen-reader tasks, production proxy/container restart recovery,
+mobile viewer operation, Windows/Linux external-app dispatch, Windows startup
+and playback, platform installers/signing and backdrop behavior remain open.
+
+## Continued follow-up — 23 October 2026
+
+- B3/B5: the connection indicator is an accessible button. HTTP explicitly says
+  Not secure. Site data opens below this control with an encryption explanation
+  and a current-site clear action using the existing destructive confirmation.
+  The clear target uses Servo's stored registered-site name, not a URL origin.
+  The panel closes and cached cookies clear on URL changes to avoid showing
+  another page's cookies. Domain emphasis and permission-management UI remain open.
+- B6/B7: the theme picker shows three-color swatches. The sidebar brand uses one
+  compact row. Tab close glyphs appear for the active tab, pointer hover or
+  keyboard focus; the close button stays keyboard accessible. Platform theme
+  filtering and duplicate footer actions remain open.
+- A4: explicit paste events on the remote screen send text; remote clipboard
+  updates offer Copy here. Clipboard denial or a missing API opens selectable
+  text for manual copying. No background local-clipboard reads are performed.
+  Live noVNC shortcut delivery and mobile clipboard validation remain open.
+
+Validation: test-harness build and JavaScript 100% line gate passed. Native smoke
+and capabilities captures are under `target/ui-ux-followup-2/native/`.
+These changes remain uncommitted alongside the previous follow-up.
+
+## Third follow-up — 23 October 2026
+
+Implemented About Wega, the new-tab shortcut grid and recent links with saved
+PNG favicons/data-only image CSP, a library fallback icon, native-backdrop theme
+filtering and removal of the duplicate sidebar bookmark control. New-tab links
+are escaped and deduplicated. Search requests HTML autofocus; native keyboard
+focus is not yet certified. The profile has unique recent visits, not visit
+frequency counts, so this is not a most-visited ranking.
+
+Network details use a bottom panel below 900 logical pixels. Default columns fit
+available width where readable; manually sized columns retain horizontal scrolling.
+Table paint is clipped to its own panel and scrollbars remain visible. Filter
+syntax moved into a tooltip instead of consuming a permanent line.
+
+Viewer Quality offers Sharp, Fast and Auto with optional local preference storage.
+Auto follows data-saving/slow-connection hints when the Network Information API
+exists; other browsers use balanced quality. It does not inspect noVNC's private
+frame queue and is not claimed to implement frame-backlog adaptation.
+
+`packaging/windows/wega.iss` defines a per-user installer with Start menu and
+uninstall entries, HTTP/HTTPS and HTML capabilities, and quoted URI launch commands.
+It does not overwrite UserChoice. Settings opens Windows Default apps explicitly.
+CD compiles the installer and runs `scripts/windows-installer-check.ps1` to check
+files, registry capabilities, the shortcut and uninstall. These Windows steps are
+prepared but have not run on this Mac. No installer has been published or signed.
+The existing portable ZIP remains available. A release signing identity, Windows
+CI/runtime validation and URL handoff to an already running instance remain open.
+
+Validation artifacts: `target/ui-ux-followup-3/native/`; JavaScript line gate,
+workflow lint and release-script tests. Native smoke, capabilities and toolbox
+runs exercise the changed surfaces. The final checks are recorded in those reports.
+
+Still requiring implementation: direct viewer/chooser IPC handoff, mobile keyboard
+and touch gestures, frame-queue quality adaptation, site permission management,
+address-domain emphasis, Windows media/backdrop integration, macOS default-browser
+registration and a confirmed engine fix for the Wikipedia icon issue. Production
+proxy restart, screen-reader and real-device checks remain unverified.
+
+Final third-follow-up checks: native smoke, capabilities and toolbox passed;
+JavaScript **443/443 lines** passed the unchanged 100% gate; six release tests,
+Clippy with warnings denied for application targets, actionlint, formatting and
+whitespace checks passed. New-tab and Network captures were inspected. The
+capabilities fixture retains its earlier 1.5× pinch zoom, so its new-tab capture
+is a zoomed viewport rather than a default-zoom full-page image. Windows installer
+compilation, installation and signing remain unverified here.
+
+## Fourth follow-up — 23 October 2026
+
+### Site permissions and address display
+
+The site panel has persistent Block/Ask controls for common requested features,
+scoped to the exact canonical HTTP(S) origin, including scheme and port. Blocking
+also denies matching queued requests, without consuming requests for another site
+or feature. Missing settings continue to prompt; grants remain Allow once.
+The callback identifies the top-level view origin, not an independent requesting
+frame origin, so remembered automatic grants are deliberately not implemented.
+Blocks apply to requests from that view and its frames. Existing device access
+is not revoked by this UI; close pages already using it when blocking access.
+The panel explains this scope, scrolls within the viewport and closes on Escape.
+
+The unfocused address field emphasizes the complete parsed host and mutes the
+scheme, credentials, port and path. Editing uses uniform text. Host boundaries
+come from URL parser positions, so a hostname in credentials or a path cannot
+be highlighted as the destination. This is full-host emphasis, not PSL-based
+registrable-domain extraction.
+
+### Direct Docker file handoff
+
+The native picker publishes a random, five-minute request in `/run/wega/chooser`.
+The authenticated viewer offers Choose from this computer and accepts dropped
+files while a request is active. It uploads through the existing bounded upload
+endpoint, then submits the uploaded paths with the request ID. Multiple selection
+is limited to 32 files of at most 32 MiB each; the existing profile quota still
+applies. Path entry and the older Upload dialog remain available as fallbacks.
+
+Chooser GET requires a session. POST also requires the expected HTTPS Origin and
+CSRF token, checks the current ID and expiry, and only accepts regular files below
+the upload root. The native side independently verifies ID, selection count and
+canonical file containment. A first-terminal-action marker prevents late uploads
+from replacing a cancellation. Picker completion/drop retires request artifacts;
+the actual uploaded files follow the existing retention policy.
+
+IPC uses a browser-owned setgid directory shared with the gateway UID's IPC group,
+not an HTTP-served path or a new TCP listener. Manifests and replies use atomic
+publication. A replaced picker cannot delete a newer request's manifest. Only
+origin metadata is published, not full URL paths, query strings or credentials.
+
+### Verification scope
+
+- Core checks cover persisted blocks, exact-origin boundaries, legacy settings,
+  spoof-resistant host ranges and one-time resolution of matching queued requests.
+- Native smoke/capabilities checks exercise address input, remembered notification
+  denial without a prompt, the site controls and a real Servo file input populated
+  by a handoff reply. The page reads the expected selected-file bytes.
+- Native handoff unit checks reject stale IDs and files outside the upload root.
+- Gateway tests cover session/CSRF/Origin requirements, expiry, uploaded-file-only
+  selection and terminal cancellation. The Python 3.14 environment supplies the
+  existing cryptography dependency; socket tests require Unix listener access.
+- The Docker HTTPS regression checks that the real browser UID can publish a
+  request and read the gateway reply while gateway secrets remain private. It
+  uses an older Linux engine binary with current runtime files, not a fresh Linux
+  Rust build or a complete live chooser interaction through noVNC.
+- Viewer regressions cover direct selection, multiple/size bounds, cancellation,
+  stale/error responses, drag/drop and fallback behavior. The unchanged JavaScript
+  100% line gate is retained. Full live Docker, touch-device and production-proxy
+  validation remain required.
+
+Reports: `target/ui-ux-followup-4/` and `target/coverage/javascript/`.
+No commits or pushes were made. Mobile device validation, frame-queue quality adaptation,
+platform media/backdrops/default-browser integration, signing and the engine icon
+issue remain open, as do the previously listed hardware/release checks.
+
+### Mobile keyboard follow-up
+
+The viewer has a Keyboard control, an on-screen-keyboard input bridge and larger
+coarse-pointer targets. Input differences send Unicode code points, corrections
+and Backspace through public `RFB.sendKey`; navigation keys and common modified
+shortcuts are forwarded explicitly. This avoids reading local clipboard content
+or depending on noVNC's private fields. Focus-on-click is disabled while typing so
+remote clicks can retain the local keyboard. The hint is dismissible and its
+storage is optional. The existing noVNC implementation handles two-finger scrolling
+and pinch as remote-page zoom; independent remote-viewport pinch zoom is not added.
+
+Regression checks cover emoji/non-ASCII text, deletion, line breaks, modifier
+release, focus behavior, disconnected input and hint dismissal. Real iOS/Android
+keyboard display, IME/autocorrect, touch gestures and assistive-technology behavior
+still require devices. These checks are not a mobile-device certification.
+
+Final fourth-follow-up results: 74 core and 34 desktop unit tests passed; native smoke and capabilities
+passed, including the permission toggle and real selected-file bytes. Gateway
+suite: 32 tests passed. JavaScript: 557/557 lines passed the existing 100% gate.
+Clippy, formatting, shell syntax and diff whitespace checks passed. Docker HTTPS
+chooser IPC/UID regression passed; its disposable container and overlay image
+were removed. No new Python line/branch coverage percentage is claimed here.
+
+
+## CI corrections and continued work — 23 October 2026
+
+[PR #4 run 39983191666](https://github.com/wulfnb/wega/actions/runs/39983191666)
+failed for three separate reasons:
+
+- The Docker builder omitted the package's `build.rs`. It now copies the script
+  before Cargo runs; a release regression checks that the manifest's build script
+  is among those build inputs.
+- Core Rust coverage passed, but eight defensive chooser-gateway lines were
+  uncovered. Added tests exercise oversized/malformed manifests, missing and
+  non-file uploads, an atomic claim race and failed publication with safe retry.
+  The gateway's 100% line threshold is unchanged. Direct invocation of the auth
+  test module now includes chooser tests as well as unittest discovery.
+- The instrumented macOS capabilities test queried the prior document during an
+  offline navigation. It now waits for the blocked destination and retries the
+  DOM predicate within a bounded deadline, retaining the actual offline assertion.
+
+An additional Linux runtime check exposed an early-rejection race in the direct
+Unix-socket auth test client: the gateway can return 403 before the client's
+separate JSON body write. The test now reads and asserts the actual response on
+`BrokenPipeError` and always closes the connection; no rejection assertion or
+gateway guard was removed. Empty 204 replies also avoid a needless body write
+after the client has received their headers; a regression simulates a closed
+body stream and verifies that no write occurs.
+
+Continued proposal work:
+
+- Windows HTML associations now resolve native absolute drive and UNC paths to
+  file URLs, including spaces, rather than sending them to web search. A
+  Windows-only regression covers both forms; Windows execution remains required.
+- New tab menu, plus button and Cmd/Ctrl+T share one search-page action. It clears
+  address-field focus and routes typing to the page; completion focuses the
+  search field only while the page still owns focus, so Cmd/Ctrl+L can interrupt.
+  The native capabilities case sends key events to Servo and checks the resulting
+  search-field value without clicking the page. It also checks that the browser
+  routes typing to the page; this does not certify OS-level IME behavior.
+
+These corrections were committed as `6256600` before the next follow-up; the agent has not pushed. At that checkpoint, whole-project
+100% coverage, Windows runtime/signing/media/backdrops, macOS default-browser
+registration, running-instance URI handoff, most-visited ranking, frame-queue quality adaptation,
+independent viewer pinch/pan, the confirmed Wikipedia engine fix and the listed
+real-device/assistive-technology/production-proxy checks remain outstanding.
+
+
+Local verification for the CI follow-up:
+
+- Fresh isolated core measurement: **1555/1628 lines (95.52%)**, 74 tests passed;
+  the unchanged 95% gate passes on macOS. The failing Ubuntu run had already
+  passed its Rust gate; its gateway coverage was the failure.
+- Full Python discovery: **52 tests passed**, gateway **443/443 lines** and
+  **158/158 branches**. The unchanged 100% line gate passes.
+- Final instrumented desktop run: **76 library + 34 desktop unit tests passed**;
+  all eight native suites passed (smoke, theme, capabilities, toolbox, download,
+  WebDriver, media and capture). The capabilities run checks focused new-tab key
+  input and the blocked offline document. Desktop line measurement is
+  **10564/12716 (83.08%)**; whole-project 100% remains outstanding.
+- The new-tab capture was inspected; it retains the fixture's deliberate 1.5×
+  pinch zoom. This is not a default-zoom full-page or real-device certification.
+
+Artifacts: `target/ci-fix/`, `target/coverage/rust/`,
+`target/coverage/python/` and `target/coverage/desktop/`.
+
+
+Fresh Linux ARM64 Docker verification:
+
+- Built the current Rust sources with `BUILD_PROFILE=dev` and `test-harness`;
+  this checks the missing-build-script fix in a fresh Linux build. License-notice
+  generation was disabled for this disposable debug image.
+- Authentication/session rotation/WebSocket revocation, rendering smoke, native
+  downloads, HTTPS gateway/chooser UID/security checks and all shell contracts
+  passed. Current gateway/viewer sources were mounted for the HTTPS regression.
+- At this checkpoint toolbox **failed** at the Memory probe: the process aborts in pinned Servo's
+  `servo-script-bindings-0.7.0/mem.rs:19` with `attempt to add with overflow`.
+  This was reproduced on both fresh ARM64 debug builds. The root cause is not
+  isolated; no test assertion or overflow check was disabled. Linux release and
+  x86_64 impact are unconfirmed, and GitHub's Ubuntu release job has not rerun.
+  See [the capability matrix](servo-capabilities.md). A complete Linux toolbox
+  pass and fully green cross-platform CI are not claimed.
+- Disposable test containers/networks were removed. The newer gateway empty-204
+  write guard is covered by Python tests; the full Docker image predates that
+  Python-only guard, while its native binary includes the final UI changes.
+
+Linux evidence: `target/ci-fix/docker-final-build.log`,
+`target/ci-fix/linux-final-checks.log` and `target/ci-fix/linux-container.log`.
+The remaining UI and platform backlog is still open; this checkpoint does not
+mark the entire proposal complete.
+
+
+## Allocation reports and remaining UI work — 23 October 2026
+
+The prior CI corrections are saved in `6256600`. This follow-up fixes the Linux
+Memory failure and continues the separate proposal backlog.
+
+### Real allocation-report fix
+
+Pinned Servo generated a Box-style size callback for Rc-backed DOM classes.
+The pointer returned by `Rc::into_raw` addresses the value after the allocation's
+reference-count header; passing it to the allocator's size API is invalid. This
+caused the Linux ARM64 debug overflow during the real toolbox Memory probe.
+
+The published `servo-script-bindings` 0.7.0 crate is now vendored. Its generator
+selects the correct callback for each allocation kind. Rc-backed objects acquire
+a temporary strong reference and use Servo's existing Rc measurement trait to
+measure the allocation base and contained values; the temporary reference then
+drops. Box-backed objects keep their original path. No arithmetic checks or
+Memory assertions were disabled, and no installed Cargo source was changed.
+
+Two Rust regressions check aligned Rc allocation pointers, preserved ownership
+counts and the Box path. A Python regression executes the actual DOM vtable
+generator for both kinds. See [the vendor patch notes](../vendor/README.md).
+Coverage fingerprints now include embedded JavaScript and vendored source and
+generator changes, preventing stale reports from validating a changed engine.
+
+A fresh Linux ARM64 debug/test-harness build passes both allocation regressions.
+The resulting image passes authentication/session rotation/WebSocket revocation,
+rendering smoke, the full toolbox including Memory reports, downloads, current
+HTTPS gateway/chooser security and UID checks, and all shell contracts. Test
+containers/networks were removed. Evidence: `target/ci-fix/rc-linux-checks.log`,
+`linux-rc-final-build.log` and `linux-container.log`. GitHub Ubuntu release CI has
+not rerun; this is local ARM64 evidence.
+
+### Most-visited shortcuts
+
+History entries persist a saturating visit count. Saved bookmarks stay first;
+remaining shortcut positions use frequency, with recency as the tie breaker,
+URL deduplication and the existing eight-tile limit. The recent-links section
+retains chronological order. Old profiles default missing counts to unknown and
+retain their order until new visits establish frequency. Counts live only in
+bounded history entries, so history deletion or eviction removes them too.
+
+Regression tests cover profile migration/round-trip, repeated visits, overflow,
+frequency versus recency, bookmark precedence, deduplication, limits and history
+clearing. The native capabilities fixture checks a genuinely ranked shortcut in
+the rendered document as well as new-tab keyboard input.
+
+### macOS browser registration and launch events
+
+The app bundle declares HTTP/HTTPS viewing and HTML/XHTML document associations,
+with an Alternate document-handler rank. Browsing settings opens System Settings
+and explains where to choose Wega. Installation in Applications and the user's
+explicit default-browser choice remain required; no default was changed.
+
+Dedicated Apple-event handlers forward web URLs and local document URLs to new
+tabs in the existing browser. Early events are queued until initialization.
+Handlers are registered again after AppKit startup, preserving winit's own
+application delegate. URL strings are decoded separately from file descriptors:
+Cocoa's file coercion can reinterpret an HTTP string as an HFS filesystem path.
+Only HTTP, HTTPS and file schemes are accepted, with per-address and batch limits.
+
+`scripts/macos-launch-test.py` creates a uniquely identified disposable app and
+profile, launches a real cold-start HTTP event, then sends two URLs and an HTML
+file containing spaces, an ampersand and an accented character to the running
+app. WebDriver checks loaded titles/URLs, tab counts and the unchanged process.
+The test normalizes macOS's decomposed Unicode filename representation. Cleanup
+terminates only that executable and unregisters only the disposable test app.
+The desktop coverage runner includes this test on macOS and preserves failure
+status. Installer/default-browser selection on real machines, Windows instance
+handoff, Developer ID signing and notarization remain separate release checks.
+
+### Remaining proposal work
+
+Implementation still open: frame-queue-driven viewer quality adaptation;
+independent viewer viewport pinch/pan; bundled Windows media and per-element
+fallbacks; a native Windows backdrop; Windows running-instance URL handoff; the
+confirmed Wikipedia icon engine fix; and remembered permission grants/current
+access revocation once the engine exposes sufficient origin/access information.
+
+Validation/release work still open: Windows build/installer/runtime and physical
+PC checks; real iOS/Android keyboard, IME, gestures and clipboard tasks; screen
+reader and OS accessibility settings; a real OS appearance toggle and compositor
+checks; production-proxy restart recovery; signing/notarization credentials; and
+complete cross-platform whole-project coverage. Core/gateway component gates do
+not establish whole-project 100% or a fully finished browser.
+
+
+### Final local verification for this follow-up
+
+- Core: **77 tests passed**, **1591/1664 lines (95.61%)**; the 95% gate passes.
+- Python: **55 tests passed**; gateway **443/443 lines and 158/158 branches**.
+  The unchanged 100% line gate passes.
+- Instrumented desktop: **79 library + 34 desktop + 2 allocation tests passed**.
+  All eight native suites pass: smoke, theme, capabilities, toolbox, download,
+  WebDriver, media and capture. Real cold-start URL and same-process batched URL
+  plus Unicode HTML-file Launch Services delivery also pass.
+- Desktop measurement: **10721/12888 lines (83.19%)**. Whole-project 100% and all
+  required platform reports remain outstanding. Coverage inventory is refreshed;
+  report completeness has not been claimed or its policy weakened. The new
+  Launch Services regression is classified with the other test drivers.
+- Production and test-harness Clippy, formatting, package-script syntax and
+  first-party/modified-vendor-line whitespace checks pass. The imported archive
+  retains its original upstream whitespace; only its two documented files differ
+  from the published crate. Existing vendored Servo and macOS linker warnings
+  remain. The new-tab capture was inspected; the fixture still uses its deliberate
+  1.5× pinch zoom and does not certify default-zoom or device layout.
+
+Evidence: `target/ci-fix/{core-followup-final,python-followup,desktop-followup}.log`,
+`target/coverage/{rust,python,desktop}/`, and desktop native run
+`run-hrdawz1d/` (including `macos-launch/launch-l7eljkqf/result.json`). The fresh
+Linux evidence is listed above. The agent has not pushed or changed the user's
+default browser. GitHub's Linux x86_64 release and Windows checks must run after
+push before cross-platform CI can be called green.

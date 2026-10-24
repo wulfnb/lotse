@@ -489,9 +489,9 @@ impl Browser {
             }
             ui.add(
                 egui::TextEdit::singleline(&mut self.tools.network.query)
-                    .hint_text("Filter URLs, methods, status")
+                    .hint_text("Filter URL or domain:example.com")
                     .desired_width(210.0),
-            );
+            ).on_hover_text("Filters: domain:example.com method:POST status:404 type:XHR is:cached is:imported · prefix - to exclude");
         });
         ui.horizontal_wrapped(|ui| {
             for (kind, label) in [
@@ -522,7 +522,7 @@ impl Browser {
                 }
             }
         });
-        ui.weak("Filters: domain:example.com method:POST status:404 type:XHR is:cached is:imported · prefix - to exclude · click column headings to sort · right-click requests for actions");
+
         if self
             .tools
             .network
@@ -530,17 +530,27 @@ impl Browser {
             .iter()
             .any(|r| Some(r.uid) == self.tools.network.selected && r.owner == owner)
         {
-            egui::Panel::right("network-detail-pane")
+            let details = if ui.available_width() < 900.0 {
+                egui::Panel::bottom("network-detail-pane-compact")
+            } else {
+                egui::Panel::right("network-detail-pane")
+            };
+            details
                 .resizable(true)
                 .default_size(420.0)
                 .min_size(150.0)
-                .max_size((ui.available_width() * 0.7).max(150.0))
+                .max_size(if ui.available_width() < 900.0 {
+                    (ui.available_height() * 0.55).max(150.0)
+                } else {
+                    (ui.available_width() * 0.5).max(150.0)
+                })
                 .show(ui, |ui| {
                     self.tools.network_rects[1] = ui.max_rect();
                     self.network_details(ui, owner);
                 });
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| {
+        ui.set_clip_rect(ui.clip_rect().intersect(ui.max_rect()));
         self.tools.network_rects[0] = ui.max_rect();
         let rows = self.tools.network.visible(owner);
         let count = rows.len();
@@ -606,6 +616,12 @@ impl Browser {
                 *width = configured;
             }
         }
+        let total: f32 = columns.iter().map(|(_, width, _)| *width).sum();
+        if ui.available_width() >= 600.0 && total > ui.available_width()
+            && self.tools.network_ui.widths.iter().all(|width| *width <= 0.0) {
+            let scale = ui.available_width() / total;
+            for (_, width, _) in &mut columns { *width *= scale; }
+        }
         let widths: Vec<_> = columns.iter().map(|(_, w, _)| *w).collect();
         let table_width: f32 = widths.iter().sum();
         let headings: Vec<_> = columns
@@ -630,6 +646,7 @@ impl Browser {
         let mut resized = None;
         egui::ScrollArea::both()
             .id_salt("network-table")
+            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
             .max_height((ui.available_height() - footer_height).max(0.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {

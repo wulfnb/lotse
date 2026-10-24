@@ -326,6 +326,12 @@ impl Browser {
                 .as_ref()
                 .map(|path| crate::capture::Capture::new(path.clone())),
         };
+        #[cfg(all(target_os = "windows", not(feature = "media")))]
+        browser.notify(
+            crate::ux::Severity::Warning,
+            "Video and audio are not available in this build.",
+            None,
+        );
         let restore = options.url.is_none() && !options.test_mode();
         let urls = if (options.smoke_test || options.theme_test || options.capabilities_test)
             && options.url.is_none()
@@ -440,6 +446,33 @@ impl Browser {
         }
     }
 
+    pub(crate) fn new_tab(&mut self) {
+        self.add_tab("wega://newtab");
+        self.focus_content();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn open_launch_urls(&mut self, urls: Vec<url::Url>) {
+        if urls.is_empty() {
+            return;
+        }
+        for url in urls {
+            self.add_tab_url(url);
+        }
+        self.focus_content();
+        self.window.set_visible(true);
+        self.window.request_redraw();
+    }
+
+    fn focus_content(&mut self) {
+        self.chrome.focus_address = false;
+        self.gui.as_ref().unwrap().egui_ctx.memory_mut(|memory| {
+            memory.surrender_focus(egui::Id::unique("address"));
+        });
+        self.chrome.page_focused = true;
+        self.view().set_focused(true);
+    }
+
     fn add_tab_url(&mut self, url: url::Url) {
         let live = self.create_view(Some(&url));
         let index = self.push_tab(Some(live), url.to_string(), String::new(), false);
@@ -494,7 +527,17 @@ impl Browser {
             builder = builder.url(url.clone());
         }
         let view = builder.build();
-        view.notify_theme_change(servo::Theme::Dark);
+        view.notify_theme_change(
+            if self
+                .profile()
+                .theme
+                .dark(self.window.theme() != Some(winit::window::Theme::Light))
+            {
+                servo::Theme::Dark
+            } else {
+                servo::Theme::Light
+            },
+        );
         Live { view, surface }
     }
 
@@ -813,6 +856,11 @@ impl Browser {
             "document.getElementById('wega-theme')?.replaceChildren(document.createTextNode({css}))"
         );
         for view in self.session.tabs().iter().filter_map(Tab::view) {
+            view.notify_theme_change(if dark {
+                servo::Theme::Dark
+            } else {
+                servo::Theme::Light
+            });
             if view.url().is_some_and(|u| u.scheme() == "wega") {
                 view.evaluate_javascript(script.clone(), |_| {});
             }
@@ -891,7 +939,20 @@ impl Browser {
         for event in events {
             match event {
                 Event::Download(url, name) => self.offer_download(&url, &name),
-                Event::Load(owner, status) => self.automation_load_status(owner, status),
+                Event::Load(owner, status) => {
+                    self.automation_load_status(owner, status);
+                    if status == servo::LoadStatus::Complete
+                        && owner == self.view().id()
+                        && self.tab().url() == "wega://newtab"
+                        && self.chrome.page_focused
+                        && !self.modal()
+                    {
+                        self.view().evaluate_javascript(
+                            "document.getElementById('search')?.focus()",
+                            |_| {},
+                        );
+                    }
+                }
                 Event::History(owner, urls, active) => {
                     if let Some(index) = self.tab_index(owner) {
                         self.session.tabs_mut()[index].history.update(urls, active);
@@ -1039,11 +1100,16 @@ impl Browser {
                     self.select_tab(index);
                 }
                 Event::Permission(origin, request) => {
-                    self.dialogs.permissions.push(
-                        origin,
-                        format!("{:?}", request.feature()),
-                        crate::permission_adapter::Permission(request),
-                    );
+                    let feature = format!("{:?}", request.feature());
+                    if self.profile().policy.permission_blocked(&origin, &feature) {
+                        request.deny();
+                    } else {
+                        self.dialogs.permissions.push(
+                            origin,
+                            feature,
+                            crate::permission_adapter::Permission(request),
+                        );
+                    }
                 }
                 Event::Authentication(request) => {
                     self.dialogs.push_authentication(request);
@@ -1097,6 +1163,7 @@ impl Browser {
                         title,
                         url,
                         visited_at: profile::visit_time(),
+                        visit_count: 0,
                     }));
                 }
                 Event::Accessibility(id, nodes) => {
@@ -1121,6 +1188,8 @@ impl Browser {
         }
         let url = self.tab().url();
         if url != self.chrome.last_url {
+            self.features.site_info = false;
+            self.features.cookies.clear();
             self.chrome.last_url = url.clone();
             // Do not replace an address while the user is typing.
             let editing = self.gui.as_ref().is_some_and(|g| {
@@ -1275,7 +1344,8 @@ impl Browser {
     }
 
     pub(crate) fn modal(&self) -> bool {
-        self.features.clear_data
+        self.features.settings
+            || self.features.clear_data
             || self.features.delete_site.is_some()
             || self.chrome.confirm_clear_history
             || !self.features.bluetooth.is_empty()
@@ -1353,8 +1423,7 @@ impl Browser {
                     }
                 }
                 "t" => {
-                    self.add_tab("about:blank");
-                    self.chrome.focus_address = true;
+                    self.new_tab();
                 }
                 "w" => self.close_tab(self.session.active()),
                 "q" => self.quit_requested = true,

@@ -10,16 +10,40 @@ impl Browser {
             false,
         );
         let document = |title: &str, body: &str| capabilities::document(title, body, palette);
+        let icon = |url: &str| match self.profile().favicons.get(url) {
+            Some(crate::profile::SavedFavicon::Png(bytes)) => {
+                use base64::Engine;
+                format!(
+                    "<img alt='' width='24' height='24' src='data:image/png;base64,{}'>",
+                    base64::engine::general_purpose::STANDARD.encode(bytes)
+                )
+            }
+            _ => "<span class='page-icon' aria-hidden='true'>▤</span>".into(),
+        };
         let shortcuts = self
             .profile()
-            .bookmarks
-            .iter()
-            .take(8)
-            .map(|b| {
+            .new_tab_shortcuts()
+            .into_iter()
+            .map(|entry| {
                 format!(
-                    "<li><a href='{}'>{}</a></li>",
-                    capabilities::html(&b.url),
-                    capabilities::html(&b.title)
+                    "<a class='tile' href='{}'>{}<span>{}</span></a>",
+                    capabilities::html(&entry.url),
+                    icon(&entry.url),
+                    capabilities::html(&entry.title)
+                )
+            })
+            .collect::<String>();
+        let recent = self
+            .profile()
+            .history
+            .iter()
+            .take(5)
+            .map(|entry| {
+                format!(
+                    "<li>{}<a href='{}'>{}</a></li>",
+                    icon(&entry.url),
+                    capabilities::html(&entry.url),
+                    capabilities::html(&entry.title)
                 )
             })
             .collect::<String>();
@@ -39,7 +63,12 @@ impl Browser {
                 )
             })
             .collect::<String>();
-        docs.insert("newtab".into(), document("Welcome to Wega", &format!("<p>Search here or press <b>Cmd/Ctrl+L</b> to enter an address.</p><form action='{}' method='get'><label for='search'>Search the web</label><p class='search-controls'>{hidden}<input id='search' name='{}' type='search' placeholder='Search {}' required><button type='submit'>Search</button></p></form><h2>Saved pages</h2><ul>{shortcuts}</ul><p><a href='wega://history'>Browse recent pages</a></p>", capabilities::html(&action), capabilities::html(&field), capabilities::html(&engine))));
+        docs.insert("newtab".into(), document("Welcome to Wega", &format!("<p>Search here or press <b>Cmd/Ctrl+L</b> to enter an address.</p><form action='{}' method='get'><label for='search'>Search the web</label><p class='search-controls'>{hidden}<input id='search' name='{}' type='search' placeholder='Search {}' required autofocus><button type='submit'>Search</button></p></form><h2>Your pages</h2><div class='tiles'>{shortcuts}</div><h2>Recent</h2><ul class='recent'>{recent}</ul>", capabilities::html(&action), capabilities::html(&field), capabilities::html(&engine))));
+        if let Some(page) = docs.get_mut("newtab")
+            && let (Some(start), Some(end)) = (page.find("<nav "), page.find("</nav>"))
+        {
+            page.replace_range(start..end + 6, "");
+        }
         for (name, title, items) in [
             ("history", "History", &self.profile().history),
             ("bookmarks", "Bookmarks", &self.profile().bookmarks),
@@ -56,6 +85,7 @@ impl Browser {
                 .collect::<String>();
             docs.insert(name.into(), document(title, &format!("<ul>{list}</ul>")));
         }
+        docs.insert("about".into(), document("About Wega", "<p>Wega 0.1.0-alpha.1</p><p>Built with Rust, Servo 0.7 and egui. This is an alpha preview.</p>"));
         docs.insert("settings".into(),document("Browser settings","<p>Use the Browser settings window to manage appearance, browsing, privacy, downloads and advanced options. If it is closed, reopen it from <b>… → Browser settings</b>.</p><p>Internal documents have no access to native browser controls.</p>"));
     }
     pub fn screenshot_page(&mut self) {
@@ -117,7 +147,18 @@ impl Browser {
             .site_data_manager()
             .site_data(servo::StorageType::all())
             .into_iter()
-            .map(|s| (s.name(), format!("{:?}", s.storage_types())))
+            .map(|s| {
+                let kinds = [
+                    (servo::StorageType::Cookies, "Cookies"),
+                    (servo::StorageType::Local, "Local storage"),
+                    (servo::StorageType::Session, "Session storage"),
+                ]
+                .into_iter()
+                .filter_map(|(kind, label)| s.storage_types().contains(kind).then_some(label))
+                .collect::<Vec<_>>()
+                .join(", ");
+                (s.name(), kinds)
+            })
             .collect();
         self.features.sites.sort_by(|a, b| a.0.cmp(&b.0));
         self.features.cookies = self
@@ -130,13 +171,11 @@ impl Browser {
                     .iter()
                     .map(|c| {
                         format!(
-                            "{}={} · domain={} · path={} · HttpOnly={} · Secure={}",
+                            "{}={} · domain={} · path={}",
                             c.name(),
                             c.value(),
                             c.domain().unwrap_or(""),
-                            c.path().unwrap_or("/"),
-                            c.http_only().unwrap_or(false),
-                            c.secure().unwrap_or(false)
+                            c.path().unwrap_or("/")
                         )
                     })
                     .collect()
@@ -202,20 +241,8 @@ impl Browser {
                         }
                     }
                     Decision::External(url) if allow => {
-                        #[cfg(target_os = "macos")]
-                        if let Err(error) = std::process::Command::new("/usr/bin/open")
-                            .arg(url.as_str())
-                            .spawn()
-                        {
-                            self.status = Some(error.to_string());
-                        }
-                        #[cfg(not(target_os = "macos"))]
-                        {
-                            let _ = url;
-                            self.status = Some(
-                                "External application launching is currently available on macOS."
-                                    .into(),
-                            );
+                        if let Err(error) = crate::ux::open_external(&url) {
+                            self.notify(crate::ux::Severity::Error, error, None);
                         }
                     }
                     _ => {}
@@ -261,9 +288,15 @@ impl Browser {
         }
         if self.features.settings {
             let mut open = true;
-            egui::Window::new("Browser settings").open(&mut open)
-                .default_width(620.0).max_width((ctx.content_rect().width()-40.0).max(280.0))
-                .default_pos(egui::pos2(24.0,80.0)).show(ctx,|ui|{
+            let fresh = self.prepare_dialog(ctx, "settings");
+            let response = egui::Modal::new(egui::Id::unique("browser-settings")).show(ctx,|ui|{
+                ui.set_width(620.0_f32.min((ctx.content_rect().width()-64.0).max(240.0)));
+                ui.horizontal(|ui| {
+                    ui.heading("Settings");
+                    let close = ui.button("Close");
+                    if fresh { close.request_focus(); }
+                    if close.clicked() { open = false; }
+                });
                 ui.horizontal_wrapped(|ui|{
                     for (i,label) in ["Appearance","Browsing","Privacy","Downloads","Advanced"].iter().enumerate() {
                         ui.selectable_value(&mut self.features.settings_section,i,*label);
@@ -275,15 +308,35 @@ impl Browser {
                         0 => {
                             ui.heading("Appearance");
                             for theme in crate::theme::Theme::ALL {
-                                if ui.selectable_label(self.profile().theme==theme,theme.name()).clicked(){self.set_theme(ctx,theme);}
+                                if self.native_theme.is_none() && matches!(theme,crate::theme::Theme::GlassLight | crate::theme::Theme::GlassDark) { continue; }
+                                ui.horizontal(|ui| {
+                                    let palette=theme.palette(self.window.theme()!=Some(winit::window::Theme::Light), false);
+                                    for color in [palette.chrome,palette.selected,palette.accent] {
+                                        let (rect,_) = ui.allocate_exact_size(egui::vec2(18.0,18.0),egui::Sense::hover());
+                                        ui.painter().rect_filled(rect,4,color);
+                                    }
+                                    if ui.selectable_label(self.profile().theme==theme,theme.name()).clicked(){self.set_theme(ctx,theme);}
+                                });
                             }
-                            ui.weak("Auto follows your system appearance. Website colors are controlled by each website.");
+                            ui.weak("Auto follows your system appearance. Websites can follow the chosen appearance.");
                             ui.horizontal(|ui|{
-                                if ui.button("Tabs on top").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Top));}
-                                if ui.button("Tabs in sidebar").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Side));}
+                                if ui.selectable_label(self.profile().layout == crate::profile::TabLayout::Top,"Tabs on top").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Top));}
+                                if ui.selectable_label(self.profile().layout == crate::profile::TabLayout::Side,"Tabs in sidebar").clicked(){self.apply(wega::application::Command::Layout(crate::profile::TabLayout::Side));}
                             });
                         }
                         1 => {
+                    #[cfg(target_os="windows")]
+                    if ui.button("Open default browser settings").clicked() {
+                        if let Err(error)=crate::ux::open_external(&url::Url::parse("ms-settings:defaultapps").unwrap()) {self.notify(crate::ux::Severity::Error,error,None);}
+                    }
+                    #[cfg(target_os="macos")]
+                    {
+                        if ui.button("Open System Settings").clicked() {
+                            let result=std::process::Command::new("/usr/bin/open").args(["-b","com.apple.systempreferences"]).spawn();
+                            if let Err(error)=result {self.notify(crate::ux::Severity::Error,format!("Could not open System Settings: {error}"),None);}
+                        }
+                        ui.label("Install Wega in Applications, then choose it under Default web browser in System Settings. Look in Desktop & Dock, or General on macOS 12.");
+                    }
                     ui.heading("Navigation and requests");
                     ui.label("Host rules match the exact host and its subdomains. Separate hosts with spaces or newlines.");
                     ui.label("Blocked hosts (also blocks subresources)");
@@ -319,15 +372,15 @@ impl Browser {
                         }
                         2 => {
                     ui.separator();ui.heading("Browsing data");
-                    if ui.button("Review cookies and stored sites").clicked(){self.refresh_site_data();self.features.site_info=true;}
-                    if ui.button("Clear browsing data…").clicked(){self.features.clear_data=true;}
+                    if ui.button("Review cookies and stored sites").clicked(){self.refresh_site_data();self.features.site_info=true;open=false;}
+                    if ui.button("Clear browsing data…").clicked(){self.features.clear_data=true;open=false;}
                     if ui.button("Clear session cookies").clicked(){self.servo.site_data_manager().clear_session_cookies(None);self.notify(crate::ux::Severity::Success,"Session cookies cleared.",None);}
 
                         }
                         3 => {
                             ui.heading("Downloads");
                             ui.label(format!("Save folder: {}",self.downloads.directory.display()));
-                            if ui.button("Open download manager").clicked(){self.download_ui.open=true;}
+                            if ui.button("Open download manager").clicked(){self.download_ui.open=true;open=false;}
                             ui.weak("Open completed files or show them in their folder from Downloads. In Docker, use the viewer's Downloads button to save to your computer.");
                         }
                         _ => {
@@ -340,12 +393,17 @@ impl Browser {
                         self.changed();self.notify(crate::ux::Severity::Success,"User script saved. Reload a page to apply.",None);
                     }
 
-                            if ui.button("Open developer diagnostics").clicked(){self.features.diagnostics=true;}
+                            let mut policy=self.profile().policy.clone();
+                            if ui.checkbox(&mut policy.show_performance,"Show performance in status bar").changed(){self.apply(wega::application::Command::Policy(policy));}
+                            if ui.button("Open developer diagnostics").clicked(){self.features.diagnostics=true;open=false;}
                         }
                     }
                 });
             });
-            self.features.settings = open;
+            self.features.settings = open && !response.should_close();
+            if !self.features.settings {
+                self.finish_dialog(ctx);
+            }
         }
         if self.features.diagnostics {
             let mut open = true;
@@ -388,13 +446,22 @@ impl Browser {
         }
         if self.features.site_info {
             let mut open = true;
+            let anchor = ctx
+                .data(|data| data.get_temp::<egui::Pos2>(egui::Id::unique("site-panel-anchor")))
+                .unwrap_or(egui::pos2(12.0, 60.0));
+            let width = 620.0_f32.min((ctx.content_rect().width() - 32.0).max(240.0));
             egui::Window::new("Site data")
                 .open(&mut open)
-                .default_width(620.0)
-                .default_pos(egui::pos2(
-                    ((ctx.content_rect().width() - 620.0) / 2.0).max(12.0),
-                    110.0,
+                .collapsible(false)
+                .resizable(false)
+                .fixed_pos(egui::pos2(
+                    anchor
+                        .x
+                        .min(ctx.content_rect().right() - width - 16.0)
+                        .max(8.0),
+                    anchor.y + 6.0,
                 ))
+                .default_width(width)
                 .frame(
                     egui::Frame::window(&ctx.style_of(if crate::theme::palette(ctx).dark {
                         egui::Theme::Dark
@@ -404,14 +471,62 @@ impl Browser {
                     .inner_margin(16),
                 )
                 .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().id_salt("site-panel-content").max_height((ctx.content_rect().height()-anchor.y-100.0).max(120.0)).show(ui,|ui| {
                     ui.label(self.tab().url());
+                    let current = self.view().url();
+                    ui.label(match current.as_ref().map(|url| url.scheme()) {
+                        Some("https") => {
+                            "Encrypted connection. The certificate is validated by the browser."
+                        }
+                        Some("http") => "Not secure: this connection is not encrypted.",
+                        _ => "Local or internal document.",
+                    });
+                    if let Some(origin) = current.as_ref().filter(|url| matches!(url.scheme(),"http"|"https")).map(|url| url.origin().ascii_serialization()) {
+                        ui.separator();
+                        ui.collapsing("Site permissions",|ui| {
+                        ui.weak("Blocked features will not prompt on this page or its frames. Other requests ask each time. Close pages already using device access when blocking it.");
+                        for (feature,label) in [("Notifications","Notifications"),("Geolocation","Location"),("Camera","Camera"),("Microphone","Microphone"),("Push","Push messages"),("Midi","MIDI devices"),("Speaker","Audio output"),("DeviceInfo","Device information"),("BackgroundSync","Background sync"),("Bluetooth","Bluetooth"),("PersistentStorage","Persistent storage"),("Gamepad","Gamepads"),("ScreenWakeLock(Screen)","Screen wake lock")] {
+                            let mut blocked = self.profile().policy.permission_blocked(&origin,feature);
+                            if ui.checkbox(&mut blocked,format!("Block {label}")).changed() {
+                                let mut policy=self.profile().policy.clone();policy.set_permission_blocked(&origin,feature,blocked);
+                                self.apply(wega::application::Command::Policy(policy));
+                                if blocked {self.dialogs.permissions.resolve(&origin,feature,false);}
+                            }
+                        }
+                        });
+                        ui.separator();
+                    }
+                    // Servo groups storage by registered site, not URL origin.
+                    let site = current
+                        .as_ref()
+                        .filter(|url| matches!(url.scheme(), "http" | "https"))
+                        .and_then(|url| url.host_str())
+                        .and_then(|host| {
+                            self.features
+                                .sites
+                                .iter()
+                                .find(|(site, _)| {
+                                    host == site || host.ends_with(&format!(".{site}"))
+                                })
+                                .map(|(site, _)| site.clone())
+                        });
+                    if let Some(site) = site
+                        && ui
+                            .button(
+                                egui::RichText::new("Clear data for this site…")
+                                    .color(crate::theme::palette(ctx).danger),
+                            )
+                            .clicked()
+                    {
+                        self.features.delete_site = Some(site);
+                    }
                     if ui.button("Refresh").clicked() {
                         self.refresh_site_data();
                     }
                     egui::ScrollArea::vertical()
                         .max_height(430.0)
                         .show(ui, |ui| {
-                            ui.heading("Cookies for current URL (including HttpOnly)");
+                            ui.heading("Cookies on this site");
                             for cookie in &self.features.cookies {
                                 ui.add(egui::Label::new(cookie).wrap());
                             }
@@ -423,19 +538,26 @@ impl Browser {
                             let mut remove = None;
                             for (site, kinds) in &self.features.sites {
                                 ui.horizontal(|ui| {
-                                    if ui.button("Delete").clicked() {
-                                        remove = Some(site.clone());
-                                    }
                                     ui.label(site);
                                     ui.weak(kinds);
+                                    if ui
+                                        .button(
+                                            egui::RichText::new("Remove")
+                                                .color(crate::theme::palette(ctx).danger),
+                                        )
+                                        .clicked()
+                                    {
+                                        remove = Some(site.clone());
+                                    }
                                 });
                             }
                             if let Some(site) = remove {
                                 self.features.delete_site = Some(site);
                             }
                         });
+                    });
                 });
-            self.features.site_info = open;
+            self.features.site_info = open && !crate::ux::escape(ctx);
         }
         if let Some(site) = self.features.delete_site.clone() {
             let fresh = self.prepare_dialog(ctx, "delete-site-data");

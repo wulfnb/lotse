@@ -55,12 +55,18 @@ with tempfile.TemporaryDirectory(prefix='wega-auth-test-') as temporary:
         if data is not None:
             headers['Content-Type'] = 'application/json'
         connection = UnixConnection('localhost', timeout=10)
-        connection.request('POST' if data is not None else 'GET', path, json.dumps(data) if data is not None else None, headers)
-        response = connection.getresponse()
-        body = response.read()
-        result = (response.status, json.loads(body) if body else {}, (response.getheader('Set-Cookie') or '').split(';', 1)[0], response.getheader('Set-Cookie') or '')
-        connection.close()
-        return result
+        try:
+            try:
+                connection.request('POST' if data is not None else 'GET', path, json.dumps(data) if data is not None else None, headers)
+            except BrokenPipeError:
+                # Header guards may reply and close before the separate body write.
+                # Read the real response; its status is still asserted by the caller.
+                pass
+            response = connection.getresponse()
+            body = response.read()
+            return (response.status, json.loads(body) if body else {}, (response.getheader('Set-Cookie') or '').split(';', 1)[0], response.getheader('Set-Cookie') or '')
+        finally:
+            connection.close()
 
     def login(user=username, secret=password):
         status, _, cookie, flags = request('/auth/login', {'username': user, 'password': secret})
